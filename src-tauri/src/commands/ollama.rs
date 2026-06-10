@@ -19,6 +19,8 @@ pub struct OllamaHealth {
 pub struct ChatMessagePayload {
     pub role: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Clone)]

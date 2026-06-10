@@ -182,7 +182,7 @@ async function runShellCommand(cmd: string): Promise<string> {
  * Run one turn of the agent conversation loop.
  * @param userQuery - The user's message. Pass null for continuation turns.
  */
-export async function runAgentTurn(userQuery: string | null): Promise<void> {
+export async function runAgentTurn(userQuery: string | null, attachedImages: string[] = []): Promise<void> {
   const aiStore = useAIStore.getState();
   const model = aiStore.activeModel;
   const sessionId = `agent-${Date.now()}`;
@@ -222,6 +222,7 @@ export async function runAgentTurn(userQuery: string | null): Promise<void> {
       role: "user",
       content: userQuery + contextStr,
       timestamp: Date.now(),
+      images: attachedImages.length > 0 ? attachedImages : undefined
     };
 
     aiStore.addMessage(userMsg);
@@ -233,10 +234,14 @@ export async function runAgentTurn(userQuery: string | null): Promise<void> {
 
   // Build chat payload — system prompt always first
   const chatPayload = [
-    { role: "system" as const, content: AGENT_SYSTEM_PROMPT },
+    { role: "system" as const, content: AGENT_SYSTEM_PROMPT, images: undefined },
     ...trimmedHistory
       .filter((m) => m.role !== "system")
-      .map((m) => ({ role: m.role as "user" | "assistant" | "system", content: m.content })),
+      .map((m) => ({ 
+        role: m.role as "user" | "assistant" | "system", 
+        content: m.content,
+        images: m.images 
+      })),
   ];
 
   // Add placeholder for streaming assistant message

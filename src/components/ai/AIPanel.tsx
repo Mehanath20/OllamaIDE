@@ -4,7 +4,17 @@
    message history, context injection, and agent executor toggles.
    ============================================================ */
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
-import { Bot, Send, AlertCircle, RefreshCw, Cpu, Download, Plus } from "lucide-react";
+import { 
+  Bot, 
+  Send, 
+  AlertCircle, 
+  RefreshCw, 
+  Cpu, 
+  Download, 
+  Plus, 
+  Image as ImageIcon,
+  X 
+} from "lucide-react";
 import { useAIStore } from "../../store/aiStore";
 import {
   checkOllamaHealth,
@@ -46,7 +56,10 @@ export default function AIPanel() {
   const [checking, setChecking] = useState(false);
   const [pullInput, setPullInput] = useState(RECOMMENDED_MODELS[0].name);
   const [isStarting, setIsStarting] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Connection check on mount
   useEffect(() => {
@@ -137,16 +150,44 @@ export default function AIPanel() {
   };
 
   const handleSendMessage = async () => {
-    if (!inputVal.trim() || isStreaming) return;
-    const prompt = inputVal;
+    if ((!inputVal.trim() && attachedImages.length === 0) || isStreaming) return;
+    const prompt = inputVal || "Examine the attached image.";
     setInputVal("");
+    
+    // Pass images, then clear state
+    const imagesToSend = [...attachedImages];
+    setAttachedImages([]);
 
     // Resolve @file mentions and inject file contents
     const { cleanedPrompt, injectedContext } = await resolveFileMentions(prompt);
     const finalPrompt = cleanedPrompt + injectedContext;
 
     // Trigger Agent Mode execution loop for everything
-    runAgentTurn(finalPrompt);
+    runAgentTurn(finalPrompt, imagesToSend);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    Array.from(e.target.files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Strip data URL prefix for Ollama
+        const base64 = result.split(',')[1];
+        if (base64) {
+          setAttachedImages((prev) => [...prev, base64]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -285,8 +326,34 @@ export default function AIPanel() {
 
               {/* Chat Input & Mode Controls */}
               <div className="chat-footer">
-
+                {attachedImages.length > 0 && (
+                  <div className="chat-image-preview">
+                    {attachedImages.map((b64, idx) => (
+                      <div key={idx} className="preview-thumb">
+                        <img src={`data:image/png;base64,${b64}`} alt="attachment" />
+                        <button className="remove-img" onClick={() => removeImage(idx)}>
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="chat-input-wrapper">
+                  <button 
+                    className="btn-attach" 
+                    title="Attach image (for vision models)"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <ImageIcon size={14} />
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    hidden 
+                    accept="image/*" 
+                    multiple
+                    onChange={handleImageUpload} 
+                  />
                   <textarea
                     className="chat-textarea"
                     rows={1}
@@ -298,7 +365,7 @@ export default function AIPanel() {
                   <button
                     className="chat-submit-btn"
                     onClick={handleSendMessage}
-                    disabled={isStreaming || !inputVal.trim()}
+                    disabled={isStreaming || (!inputVal.trim() && attachedImages.length === 0)}
                   >
                     <Send size={14} />
                   </button>
@@ -711,7 +778,7 @@ export default function AIPanel() {
           border: 1px solid var(--border-soft);
         }
 
-
+        .agent-tasks-container {
           background: rgba(0,0,0,0.1);
           border: 1px solid var(--border-soft);
           border-radius: 6px;
@@ -755,6 +822,119 @@ export default function AIPanel() {
         .placeholder-icon {
           opacity: 0.5;
         }
+
+        .chat-input-wrapper {
+          display: flex;
+          background: var(--bg-2);
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-sm);
+          padding: var(--space-2) var(--space-3);
+          gap: var(--space-2);
+          align-items: flex-end;
+          transition: border-color var(--trans-fast);
+          position: relative;
+        }
+
+        .chat-input-wrapper:focus-within {
+          border-color: var(--accent);
+        }
+
+        .btn-attach {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 4px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: color var(--trans-fast);
+        }
+        .btn-attach:hover { color: var(--text-primary); }
+
+        .chat-textarea {
+          flex: 1;
+          background: transparent;
+          border: none;
+          color: var(--text-primary);
+          font-family: var(--font-sans);
+          font-size: var(--text-sm);
+          resize: none;
+          outline: none;
+          max-height: 150px;
+          padding: 2px 0;
+          line-height: 1.5;
+        }
+
+        .chat-submit-btn {
+          background: var(--accent);
+          color: white;
+          border: none;
+          border-radius: 4px;
+          width: 28px;
+          height: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: background var(--trans-fast), opacity var(--trans-fast);
+          flex-shrink: 0;
+          position: relative !important;
+          right: auto !important;
+          bottom: auto !important;
+        }
+
+        .chat-submit-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .chat-submit-btn:not(:disabled):hover {
+          background: var(--accent-light, #9353d3);
+        }
+        
+        .chat-image-preview {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          padding: 8px 12px;
+          background: var(--bg-1);
+          border-bottom: 1px solid var(--border-soft);
+        }
+        
+        .preview-thumb {
+          position: relative;
+          width: 50px;
+          height: 50px;
+          border-radius: 6px;
+          overflow: hidden;
+          border: 1px solid var(--border);
+        }
+        
+        .preview-thumb img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        .remove-img {
+          position: absolute;
+          top: 2px;
+          right: 2px;
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          background: rgba(0,0,0,0.6);
+          color: white;
+          border: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          padding: 0;
+        }
+        .remove-img:hover { background: rgba(255,0,0,0.8); }
       `}</style>
     </div>
   );

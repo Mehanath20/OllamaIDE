@@ -11,6 +11,7 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   agentSteps?: AgentStep[]; // optional steps display for agent responses
+  images?: string[]; // base64 encoded images for vision models
 }
 
 export interface AgentStep {

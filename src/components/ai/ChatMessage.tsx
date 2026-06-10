@@ -101,6 +101,13 @@ export default function ChatMessage({ message, isStreaming = false }: Props) {
       </div>
 
       <div className={`msg-bubble msg-bubble--${role}`}>
+        {message.images && message.images.length > 0 && (
+          <div className="msg-images">
+            {message.images.map((b64, idx) => (
+              <img key={idx} src={`data:image/png;base64,${b64}`} alt="attachment" className="msg-attached-img" />
+            ))}
+          </div>
+        )}
         {isSystem ? (
           <SystemMessageContent content={content} />
         ) : isUser ? (
@@ -179,6 +186,19 @@ export default function ChatMessage({ message, isStreaming = false }: Props) {
         .user-text {
           white-space: pre-wrap;
           word-break: break-word;
+        }
+        .msg-images {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+        .msg-attached-img {
+          max-width: 200px;
+          max-height: 200px;
+          border-radius: 6px;
+          border: 1px solid rgba(255,255,255,0.1);
+          object-fit: cover;
         }
       `}</style>
     </div>
