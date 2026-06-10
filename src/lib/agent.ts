@@ -72,13 +72,19 @@ class Solution:
         return sorted(nums)
 </write_file>
 
+User: "run the command ls"
+CORRECT response:
+<run_command>ls</run_command>
+
 ## RULES:
 1. File creation/editing tasks → use <write_file> IMMEDIATELY, no preamble.
-2. Use the filename the user specifies. If none given, pick a sensible name.
-3. If the user just wants to chat or ask a question → respond with text only (no tags).
-4. After a file action completes, briefly confirm what you did (1-2 sentences max).
-5. File paths are relative to the workspace root. Use simple filenames (e.g. "hello.py" not "./src/hello.py") unless the user specifies otherwise.
-6. For multi-file tasks: handle one file per turn. The system will call you again for the next step.
+2. Shell/terminal tasks → use <run_command> IMMEDIATELY, no preamble.
+3. ABSOLUTELY NO MARKDOWN CODE BLOCKS (\`\`\`) for file contents or terminal commands. You MUST use the XML tags (<write_file>...</write_file> or <run_command>...</run_command>).
+4. Use the filename the user specifies. If none given, pick a sensible name.
+5. If the user just wants to chat or ask a question → respond with text only (no tags).
+6. After an action completes, briefly confirm what you did (1-2 sentences max).
+7. File paths are relative to the workspace root. Use simple filenames (e.g. "hello.py" not "./src/hello.py") unless the user specifies otherwise.
+8. For multi-file tasks: handle one file per turn. The system will call you again for the next step.
 `;
 
 /**
