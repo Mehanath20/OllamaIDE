@@ -1,0 +1,160 @@
+/* ============================================================
+   DESIGN SYSTEM — Ollama IDE
+   All CSS custom properties live here. Import this first.
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+/* ── Color Palette ─────────────────────────────────────────── */
+:root {
+  /* New Semantic Tokens */
+  --background: #0A0A0A;
+  --sidebar:    #0D0D0D;
+  --editor:     #101010;
+  --ai-panel:   #121212;
+  --terminal:   #080808;
+
+  --border:     #202020;
+  --border-soft:#202020;
+
+  --text-main:  #F5F5F5;
+  --text-muted: #8A8A8A;
+  
+  --hover:      #181818;
+  --active:     #1F1F1F;
+
+  /* Legacy Background scale (Mapped) */
+  --bg-0: var(--background);
+  --bg-1: var(--sidebar);
+  --bg-2: var(--editor);
+  --bg-3: var(--active);
+  --bg-4: var(--hover);
+
+  /* Text aliases */
+  --text-primary:   var(--text-main);
+  --text-secondary: var(--text-muted);
+  --text-inverse:   #000000;
+
+  /* Accent — subtle grey */
+  --accent:         #e4e4e7;
+  --accent-hover:   #ffffff;
+  --accent-soft:    rgba(228, 228, 231, 0.15);
+  --accent-glow:    rgba(228, 228, 231, 0.35);
+
+  /* Semantic colours */
+  --success:  #10b981;
+  --warning:  #f59e0b;
+  --error:    #ef4444;
+  --info:     #3b82f6;
+
+  /* Syntax highlight tokens (used by Monaco theme) */
+  --syn-keyword:   #c792ea;
+  --syn-string:    #c3e88d;
+  --syn-number:    #f78c6c;
+  --syn-comment:   #52525b;
+  --syn-function:  #82aaff;
+  --syn-type:      #ffcb6b;
+  --syn-variable:  #eeffff;
+
+  /* ── Typography ──────────────────────────────────────────── */
+  --font-ui:   "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+
+  --text-xs:   0.7rem;
+  --text-sm:   0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg:   1rem;
+  --text-xl:   1.125rem;
+
+  /* ── Spacing ─────────────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* ── Radii ───────────────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* ── Panels ──────────────────────────────────────────────── */
+  --sidebar-width:     240px;
+  --activity-bar-w:    48px;
+  --bottom-panel-h:    240px;
+  --titlebar-h:        36px;
+  --statusbar-h:       24px;
+  --tab-h:             36px;
+
+  /* ── Transitions ─────────────────────────────────────────── */
+  --trans-fast:   80ms ease;
+  --trans-normal: 150ms ease;
+  --trans-slow:   250ms ease;
+
+  /* ── Scrollbar ───────────────────────────────────────────── */
+  --scrollbar-w: 6px;
+  --scrollbar-thumb: #2e3340;
+  --scrollbar-thumb-hover: #414858;
+}
+
+/* ── Reset & Base ───────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-0);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Disable text selection in UI chrome */
+button,
+[data-tauri-drag-region] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: var(--scrollbar-w);
+  height: var(--scrollbar-w);
+}
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--scrollbar-thumb); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* ── Focus ring ─────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Utility classes ─────────────────────────────────────────── */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mono { font-family: var(--font-mono); }
