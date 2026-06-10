@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Puzzle, Search, Download, Check, Trash2 } from "lucide-react";
+import { Search, Download, Check, Trash2 } from "lucide-react";
 
 interface Extension {
   id: string;

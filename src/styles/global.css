@@ -1,53 +1,70 @@
 /* ============================================================
-   DESIGN SYSTEM — Ollama IDE
+   DESIGN SYSTEM — Antigravity IDE
    All CSS custom properties live here. Import this first.
    ============================================================ */
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+/* Local fonts — no internet required */
+@import "@fontsource/inter/300.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
 
 /* ── Color Palette ─────────────────────────────────────────── */
 :root {
-  /* New Semantic Tokens */
-  --background: #0A0A0A;
-  --sidebar:    #0D0D0D;
+  /* Surface scale */
+  --background: #0a0a0a;
+  --sidebar:    #0d0d0d;
   --editor:     #101010;
-  --ai-panel:   #121212;
-  --terminal:   #080808;
+  --ai-panel:   #0d0d0d;
+  --terminal:   #090909;
 
-  --border:     #202020;
-  --border-soft:#202020;
+  /* Borders */
+  --border:      #232323;
+  --border-soft: #1a1a1a;
 
-  --text-main:  #F5F5F5;
-  --text-muted: #8A8A8A;
-  
-  --hover:      #181818;
-  --active:     #1F1F1F;
+  /* Text */
+  --text-main:      #f0f0f0;
+  --text-muted:     #6b6b6b;
+  --text-secondary: #9a9a9a;
 
-  /* Legacy Background scale (Mapped) */
-  --bg-0: var(--background);
-  --bg-1: var(--sidebar);
-  --bg-2: var(--editor);
-  --bg-3: var(--active);
-  --bg-4: var(--hover);
+  /* Surfaces */
+  --hover:  #161616;
+  --active: #1c1c1c;
+
+  /* Legacy background scale (aliased) */
+  --bg-0: #080808;
+  --bg-1: #0d0d0d;
+  --bg-2: #101010;
+  --bg-3: #161616;
+  --bg-4: #1c1c1c;
+  --bg-5: #242424;
 
   /* Text aliases */
   --text-primary:   var(--text-main);
-  --text-secondary: var(--text-muted);
   --text-inverse:   #000000;
 
-  /* Accent — subtle grey */
-  --accent:         #e4e4e7;
-  --accent-hover:   #ffffff;
-  --accent-soft:    rgba(228, 228, 231, 0.15);
-  --accent-glow:    rgba(228, 228, 231, 0.35);
+  /* ── Accent — indigo/violet for IDE actions ── */
+  --accent:       #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-soft:  rgba(124, 58, 237, 0.15);
+  --accent-glow:  rgba(124, 58, 237, 0.4);
 
-  /* Semantic colours */
-  --success:  #10b981;
-  --warning:  #f59e0b;
-  --error:    #ef4444;
-  --info:     #3b82f6;
+  /* ── Semantic Status Colors ── */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error:   #ef4444;
+  --info:    #3b82f6;
 
-  /* Syntax highlight tokens (used by Monaco theme) */
+  /* Shorthand aliases used in components */
+  --green:   #10b981;
+  --yellow:  #f59e0b;
+  --red:     #ef4444;
+  --blue:    #3b82f6;
+
+  /* ── Syntax highlight tokens ── */
   --syn-keyword:   #c792ea;
   --syn-string:    #c3e88d;
   --syn-number:    #f78c6c;
@@ -56,17 +73,18 @@
   --syn-type:      #ffcb6b;
   --syn-variable:  #eeffff;
 
-  /* ── Typography ──────────────────────────────────────────── */
+  /* ── Typography ── */
   --font-ui:   "Inter", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
 
-  --text-xs:   0.7rem;
-  --text-sm:   0.8125rem;
-  --text-base: 0.875rem;
-  --text-lg:   1rem;
-  --text-xl:   1.125rem;
+  --text-xs:   0.6875rem;  /* 11px */
+  --text-sm:   0.8125rem;  /* 13px */
+  --text-base: 0.875rem;   /* 14px */
+  --text-md:   0.875rem;   /* alias for base */
+  --text-lg:   1rem;       /* 16px */
+  --text-xl:   1.125rem;   /* 18px */
 
-  /* ── Spacing ─────────────────────────────────────────────── */
+  /* ── Spacing ── */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -74,31 +92,31 @@
   --space-5: 20px;
   --space-6: 24px;
 
-  /* ── Radii ───────────────────────────────────────────────── */
-  --radius-sm: 4px;
+  /* ── Radii ── */
+  --radius-sm: 3px;
   --radius-md: 6px;
   --radius-lg: 10px;
 
-  /* ── Panels ──────────────────────────────────────────────── */
-  --sidebar-width:     240px;
-  --activity-bar-w:    48px;
-  --bottom-panel-h:    240px;
-  --titlebar-h:        36px;
-  --statusbar-h:       24px;
-  --tab-h:             36px;
+  /* ── Layout ── */
+  --sidebar-width:   240px;
+  --activity-bar-w:  48px;
+  --bottom-panel-h:  240px;
+  --titlebar-h:      36px;
+  --statusbar-h:     22px;
+  --tab-h:           35px;
 
-  /* ── Transitions ─────────────────────────────────────────── */
+  /* ── Transitions ── */
   --trans-fast:   80ms ease;
   --trans-normal: 150ms ease;
   --trans-slow:   250ms ease;
 
-  /* ── Scrollbar ───────────────────────────────────────────── */
-  --scrollbar-w: 6px;
-  --scrollbar-thumb: #2e3340;
-  --scrollbar-thumb-hover: #414858;
+  /* ── Scrollbar ── */
+  --scrollbar-w:           5px;
+  --scrollbar-thumb:       #2a2a2a;
+  --scrollbar-thumb-hover: #3a3a3a;
 }
 
-/* ── Reset & Base ───────────────────────────────────────────── */
+/* ── Reset & Base ── */
 *,
 *::before,
 *::after {
@@ -122,14 +140,13 @@ body,
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Disable text selection in UI chrome */
-button,
+/* Disable text selection only on drag regions */
 [data-tauri-drag-region] {
   user-select: none;
   -webkit-user-select: none;
 }
 
-/* ── Scrollbars ─────────────────────────────────────────────── */
+/* ── Scrollbars ── */
 ::-webkit-scrollbar {
   width: var(--scrollbar-w);
   height: var(--scrollbar-w);
@@ -138,13 +155,14 @@ button,
 ::-webkit-scrollbar-thumb  { background: var(--scrollbar-thumb); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
-/* ── Focus ring ─────────────────────────────────────────────── */
+/* ── Focus ring ── */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
-/* ── Utility classes ─────────────────────────────────────────── */
+/* ── Utility classes ── */
 .truncate {
   overflow: hidden;
   text-overflow: ellipsis;

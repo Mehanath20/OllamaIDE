@@ -78,28 +78,45 @@ pub async fn list_models() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub fn start_ollama() -> Result<(), String> {
-    let path_app = "D:\\Ollama\\ollama app.exe";
-    let path_cli = "D:\\Ollama\\ollama.exe";
-
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         const DETACHED_PROCESS: u32 = 0x00000008;
 
-        if std::path::Path::new(path_app).exists() {
-            Command::new(path_app)
-                .creation_flags(DETACHED_PROCESS)
-                .spawn()
-                .map_err(|e| e.to_string())?;
-        } else if std::path::Path::new(path_cli).exists() {
-            Command::new(path_cli)
-                .arg("serve")
-                .creation_flags(DETACHED_PROCESS)
-                .spawn()
-                .map_err(|e| e.to_string())?;
-        } else {
-            return Err("Ollama executable not found in D:\\Ollama".to_string());
+        // Build a list of candidate paths in priority order
+        let mut candidates: Vec<std::path::PathBuf> = vec![];
+
+        // 1. LOCALAPPDATA\Programs\Ollama (default installer path)
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            candidates.push(std::path::PathBuf::from(&local_app_data)
+                .join("Programs").join("Ollama").join("ollama app.exe"));
+            candidates.push(std::path::PathBuf::from(&local_app_data)
+                .join("Programs").join("Ollama").join("ollama.exe"));
         }
+
+        // 2. Program Files
+        if let Ok(pf) = std::env::var("ProgramFiles") {
+            candidates.push(std::path::PathBuf::from(&pf).join("Ollama").join("ollama app.exe"));
+            candidates.push(std::path::PathBuf::from(&pf).join("Ollama").join("ollama.exe"));
+        }
+
+        // 3. Try ollama from PATH
+        candidates.push(std::path::PathBuf::from("ollama.exe"));
+
+        for candidate in &candidates {
+            if candidate.exists() || candidate.to_str().map(|s| s == "ollama.exe").unwrap_or(false) {
+                let result = Command::new(candidate)
+                    .arg("serve")
+                    .creation_flags(DETACHED_PROCESS)
+                    .spawn();
+                match result {
+                    Ok(_) => return Ok(()),
+                    Err(_) => continue,
+                }
+            }
+        }
+
+        return Err("Ollama executable not found. Please install Ollama from https://ollama.ai".to_string());
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -107,10 +124,9 @@ pub fn start_ollama() -> Result<(), String> {
         Command::new("ollama")
             .arg("serve")
             .spawn()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Failed to start Ollama: {}. Is it installed?", e))?;
+        Ok(())
     }
-
-    Ok(())
 }
 
 #[tauri::command]

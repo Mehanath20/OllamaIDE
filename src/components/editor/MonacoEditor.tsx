@@ -1,8 +1,9 @@
 /* ============================================================
    MonacoEditor.tsx
    - Full Monaco instance with custom dark theme
-   - Ctrl+S saves via write_file
+   - Ctrl+S saves via write_file (resolves path from store, not prop)
    - Tracks cursor position → uiStore
+   - Uses defaultValue to prevent prop-driven re-render loop
    ============================================================ */
 import { useRef, useEffect } from "react";
 import Editor, { useMonaco } from "@monaco-editor/react";
@@ -23,7 +24,7 @@ export default function MonacoEditor({ path, content, language }: Props) {
   const monaco = useMonaco();
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const { updateContent, markSaved } = useEditorStore();
-  const { setCursorPosition } = useUIStore() as any;
+  const { setCursorPosition, setSelectedCode } = useUIStore();
 
   // Register custom theme once Monaco loads
   useEffect(() => {
@@ -32,40 +33,50 @@ export default function MonacoEditor({ path, content, language }: Props) {
       base: "vs-dark",
       inherit: true,
       rules: [
-        { token: "comment",   foreground: "546e7a", fontStyle: "italic" },
-        { token: "keyword",   foreground: "c792ea", fontStyle: "bold" },
-        { token: "string",    foreground: "c3e88d" },
-        { token: "number",    foreground: "f78c6c" },
-        { token: "type",      foreground: "ffcb6b" },
-        { token: "function",  foreground: "82aaff" },
-        { token: "variable",  foreground: "eeffff" },
-        { token: "delimiter", foreground: "89ddff" },
-        { token: "tag",       foreground: "f07178" },
-        { token: "attribute.name",  foreground: "ffcb6b" },
-        { token: "attribute.value", foreground: "c3e88d" },
+        { token: "comment",           foreground: "546e7a", fontStyle: "italic" },
+        { token: "keyword",           foreground: "c792ea", fontStyle: "bold" },
+        { token: "string",            foreground: "c3e88d" },
+        { token: "number",            foreground: "f78c6c" },
+        { token: "type",              foreground: "ffcb6b" },
+        { token: "function",          foreground: "82aaff" },
+        { token: "variable",          foreground: "eeffff" },
+        { token: "delimiter",         foreground: "89ddff" },
+        { token: "tag",               foreground: "f07178" },
+        { token: "attribute.name",    foreground: "ffcb6b" },
+        { token: "attribute.value",   foreground: "c3e88d" },
+        { token: "regexp",            foreground: "f07178" },
+        { token: "constant",          foreground: "f78c6c" },
+        { token: "namespace",         foreground: "ffcb6b" },
       ],
       colors: {
-        "editor.background":           "#101010",
-        "editor.foreground":           "#F5F5F5",
-        "editorLineNumber.foreground": "#52525b",
-        "editorLineNumber.activeForeground": "#ffffff",
-        "editor.lineHighlightBackground":   "#181818",
-        "editor.selectionBackground":        "#333333",
-        "editor.inactiveSelectionBackground":"#2a2a2a",
-        "editorIndentGuide.background1":     "#333333",
-        "editorIndentGuide.activeBackground1":"#e4e4e750",
-        "editorCursor.foreground":           "#ffffff",
-        "editor.findMatchBackground":        "#ffffff40",
-        "editor.findMatchHighlightBackground":"#ffffff20",
-        "editorWidget.background":           "#1f1f1f",
-        "editorWidget.border":               "#202020",
-        "editorSuggestWidget.background":    "#1f1f1f",
-        "editorSuggestWidget.border":        "#202020",
-        "editorSuggestWidget.selectedBackground":"#181818",
-        "input.background":                  "#1f1f1f",
-        "input.border":                      "#333333",
-        "scrollbarSlider.background":        "#33333350",
-        "scrollbarSlider.hoverBackground":   "#52525b90",
+        "editor.background":                    "#0f0f0f",
+        "editor.foreground":                    "#f0f0f0",
+        "editorLineNumber.foreground":          "#3a3a3a",
+        "editorLineNumber.activeForeground":    "#9a9a9a",
+        "editor.lineHighlightBackground":       "#161616",
+        "editor.lineHighlightBorder":           "#161616",
+        "editor.selectionBackground":           "#2a2a3a",
+        "editor.inactiveSelectionBackground":   "#1e1e2a",
+        "editorIndentGuide.background1":        "#1e1e1e",
+        "editorIndentGuide.activeBackground1":  "#333333",
+        "editorCursor.foreground":              "#7c3aed",
+        "editor.findMatchBackground":           "#7c3aed40",
+        "editor.findMatchHighlightBackground":  "#7c3aed20",
+        "editorWidget.background":              "#141414",
+        "editorWidget.border":                  "#202020",
+        "editorSuggestWidget.background":       "#141414",
+        "editorSuggestWidget.border":           "#202020",
+        "editorSuggestWidget.selectedBackground":"#1e1e1e",
+        "editorSuggestWidget.highlightForeground":"#7c3aed",
+        "input.background":                     "#141414",
+        "input.border":                         "#282828",
+        "focusBorder":                          "#7c3aed",
+        "scrollbarSlider.background":           "#2a2a2a50",
+        "scrollbarSlider.hoverBackground":      "#3a3a3a90",
+        "editorGutter.background":              "#0f0f0f",
+        "editorOverviewRuler.border":           "#00000000",
+        "minimapSlider.background":             "#2a2a2a50",
+        "minimapSlider.hoverBackground":        "#3a3a3a90",
       },
     });
     monaco.editor.setTheme("antigravity-dark");
@@ -78,7 +89,7 @@ export default function MonacoEditor({ path, content, language }: Props) {
     const handleEditorAction = (e: Event) => {
       const customEvent = e as CustomEvent<string>;
       const actionId = customEvent.detail;
-      editor.trigger('titlebar-menu', actionId, null);
+      editor.trigger("titlebar-menu", actionId, null);
     };
     document.addEventListener("editor-action", handleEditorAction);
 
@@ -88,16 +99,19 @@ export default function MonacoEditor({ path, content, language }: Props) {
     });
 
     // Ctrl+S → save
+    // IMPORTANT: Always read path from the store at save time, not from the closed-over prop.
     editor.addCommand(monaco?.KeyMod.CtrlCmd! | monaco?.KeyCode.KeyS!, async () => {
       const current = editor.getValue();
+      // Resolve the canonical path from the store (handles renames, untitled files, etc.)
+      const storePath = useEditorStore.getState().activeFile ?? path;
       try {
-        if (path.startsWith("Untitled-")) {
-          const newPath = await save({ defaultPath: "Untitled.txt" });
+        if (storePath.startsWith("Untitled-")) {
+          const newPath = await save({ defaultPath: "untitled.txt" });
           if (typeof newPath === "string") {
             await invoke("write_file", { path: newPath, content: current });
             const { openFile, closeFile } = useEditorStore.getState();
-            closeFile(path);
-            const name = newPath.split(/[\\/]/).pop() || newPath;
+            closeFile(storePath);
+            const name = newPath.split(/[/\\]/).pop() || newPath;
             const ext = name.split(".").pop() || "";
             openFile({
               path: newPath,
@@ -108,8 +122,8 @@ export default function MonacoEditor({ path, content, language }: Props) {
             });
           }
         } else {
-          await invoke("write_file", { path, content: current });
-          markSaved(path);
+          await invoke("write_file", { path: storePath, content: current });
+          markSaved(storePath);
         }
       } catch (err) {
         console.error("Save failed:", err);
@@ -118,12 +132,10 @@ export default function MonacoEditor({ path, content, language }: Props) {
 
     // Track cursor position
     editor.onDidChangeCursorPosition((e) => {
-      if (typeof setCursorPosition === "function") {
-        setCursorPosition({
-          line: e.position.lineNumber,
-          column: e.position.column,
-        });
-      }
+      setCursorPosition({
+        line: e.position.lineNumber,
+        column: e.position.column,
+      });
     });
 
     // Track text selection
@@ -131,10 +143,7 @@ export default function MonacoEditor({ path, content, language }: Props) {
       const model = editor.getModel();
       if (model) {
         const selected = model.getValueInRange(e.selection);
-        const { setSelectedCode } = useUIStore.getState() as any;
-        if (typeof setSelectedCode === "function") {
-          setSelectedCode(selected || null);
-        }
+        setSelectedCode(selected || null);
       }
     });
 
@@ -154,17 +163,17 @@ export default function MonacoEditor({ path, content, language }: Props) {
         height="100%"
         width="100%"
         language={language}
-        value={content}
+        defaultValue={content}  // Use defaultValue to prevent prop-driven content re-render loop
         theme="antigravity-dark"
         onMount={handleMount}
         onChange={handleChange}
         options={{
-          fontSize: 14,
-          fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+          fontSize: 13,
+          fontFamily: '"JetBrains Mono", "Cascadia Code", "Fira Code", Consolas, monospace',
           fontLigatures: true,
-          lineHeight: 22,
+          lineHeight: 21,
           tabSize: 2,
-          minimap: { enabled: true, scale: 1, side: "right" },
+          minimap: { enabled: true, scale: 1, side: "right", renderCharacters: false },
           scrollBeyondLastLine: false,
           smoothScrolling: true,
           cursorBlinking: "phase",
@@ -173,23 +182,27 @@ export default function MonacoEditor({ path, content, language }: Props) {
           bracketPairColorization: { enabled: true },
           guides: { indentation: true, bracketPairs: true },
           stickyScroll: { enabled: true },
-          padding: { top: 12, bottom: 12 },
+          padding: { top: 14, bottom: 14 },
           overviewRulerBorder: false,
           hideCursorInOverviewRuler: true,
           scrollbar: {
-            vertical: "visible",
-            horizontal: "visible",
-            verticalScrollbarSize: 6,
-            horizontalScrollbarSize: 6,
+            vertical: "auto",
+            horizontal: "auto",
+            verticalScrollbarSize: 5,
+            horizontalScrollbarSize: 5,
           },
           suggest: {
             showIcons: true,
             preview: true,
+            insertMode: "replace",
           },
           quickSuggestions: { other: true, comments: false, strings: true },
           wordWrap: "off",
           renderLineHighlight: "gutter",
           fixedOverflowWidgets: true,
+          mouseWheelZoom: true,
+          formatOnPaste: true,
+          detectIndentation: true,
         }}
       />
 
@@ -197,7 +210,7 @@ export default function MonacoEditor({ path, content, language }: Props) {
         .monaco-wrapper {
           width: 100%;
           height: 100%;
-          background: var(--bg-2);
+          background: #0f0f0f;
           overflow: hidden;
         }
       `}</style>

@@ -4,14 +4,13 @@
    message history, context injection, and agent executor toggles.
    ============================================================ */
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
-import { Bot, Send, Sparkles, AlertCircle, RefreshCw, Cpu, Download, ToggleLeft, ToggleRight, CheckSquare, MessageSquare, Code, TerminalSquare } from "lucide-react";
-import { useAIStore, ChatMessage as ChatMessageType } from "../../store/aiStore";
+import { Bot, Send, AlertCircle, RefreshCw, Cpu, Download, Plus } from "lucide-react";
+import { useAIStore } from "../../store/aiStore";
 import {
   checkOllamaHealth,
   startOllama,
   listModels,
   pullModel,
-  chatOllama,
 } from "../../lib/ollama";
 import { runAgentTurn } from "../../lib/agent";
 import { resolveFileMentions } from "../../lib/fileUtils";
@@ -34,24 +33,19 @@ export default function AIPanel() {
     ollamaOnline,
     isPulling,
     pullProgress,
-    agentMode,
-    addMessage,
-    updateLastMessageContent,
-    setStreaming,
     setOllamaOnline,
     setOllamaVersion,
     setInstalledModels,
     setActiveModel,
     setIsPulling,
     setPullProgress,
-    setAgentMode,
+    clearMessages,
   } = useAIStore();
 
   const [inputVal, setInputVal] = useState("");
   const [checking, setChecking] = useState(false);
   const [pullInput, setPullInput] = useState(RECOMMENDED_MODELS[0].name);
   const [isStarting, setIsStarting] = useState(false);
-  const [activeTab, setActiveTab] = useState<"chat" | "agent" | "review" | "terminal">("chat");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Connection check on mount
@@ -151,50 +145,8 @@ export default function AIPanel() {
     const { cleanedPrompt, injectedContext } = await resolveFileMentions(prompt);
     const finalPrompt = cleanedPrompt + injectedContext;
 
-    if (agentMode) {
-      // Trigger Agent Mode execution loop
-      runAgentTurn(finalPrompt);
-    } else {
-      // Standard streaming Chat Mode
-      const userMessage: ChatMessageType = {
-        id: `user-${Date.now()}`,
-        role: "user",
-        content: prompt,
-        timestamp: Date.now(),
-      };
-      addMessage(userMessage);
-
-      // System prompt for chat
-      const chatHistory = [
-        { role: "system" as const, content: "You are Antigravity, a professional coding assistant. Provide precise, clean answers." },
-        ...messages.map((m) => ({ role: m.role, content: m.content })),
-        { role: "user" as const, content: finalPrompt },
-      ];
-
-      const assistantMsgId = `assistant-${Date.now()}`;
-      const placeholder: ChatMessageType = {
-        id: assistantMsgId,
-        role: "assistant",
-        content: "",
-        timestamp: Date.now(),
-      };
-      addMessage(placeholder);
-      setStreaming(true);
-
-      let contentBuffer = "";
-      try {
-        await chatOllama(assistantMsgId, activeModel, chatHistory, (chunk, done) => {
-          contentBuffer += chunk;
-          updateLastMessageContent(contentBuffer);
-          if (done) {
-            setStreaming(false);
-          }
-        });
-      } catch (err: any) {
-        setStreaming(false);
-        updateLastMessageContent(`Error calling Ollama: ${err.message || err}`);
-      }
-    }
+    // Trigger Agent Mode execution loop for everything
+    runAgentTurn(finalPrompt);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -209,24 +161,35 @@ export default function AIPanel() {
       {/* Header section with Model Selection */}
       <div className="ai-header">
         <div className="ai-header-left">
-          <span className="ai-header-title">🤖 AI Agent</span>
+          <span className="ai-header-title">✦ AI AGENT</span>
         </div>
-        {ollamaOnline && installedModels.length > 0 && (
-          <select
-            className="model-select"
-            value={activeModel}
-            onChange={(e) => setActiveModel(e.target.value)}
-          >
-            {installedModels.map((m) => (
-              <option key={m} value={m}>
-                {m.length > 15 ? m.substring(0, 15) + "..." : m}
-              </option>
-            ))}
-          </select>
-        )}
-        <button className="btn-refresh-connection" onClick={checkConnection} title="Refresh connection">
-          <RefreshCw size={12} className={checking ? "spin" : ""} />
-        </button>
+        <div className="ai-header-right">
+          {ollamaOnline && installedModels.length > 0 && (
+            <select
+              className="model-select"
+              value={activeModel}
+              onChange={(e) => setActiveModel(e.target.value)}
+            >
+              {installedModels.map((m) => (
+                <option key={m} value={m}>
+                  {m.length > 18 ? m.substring(0, 18) + "…" : m}
+                </option>
+              ))}
+            </select>
+          )}
+          {messages.length > 0 && (
+            <button
+              className="btn-header-action"
+              onClick={() => { clearMessages(); }}
+              title="New conversation"
+            >
+              <Plus size={13} />
+            </button>
+          )}
+          <button className="btn-header-action" onClick={checkConnection} title="Refresh connection">
+            <RefreshCw size={12} className={checking ? "spin" : ""} />
+          </button>
+        </div>
       </div>
 
       {/* Main Screen Content */}
@@ -285,65 +248,39 @@ export default function AIPanel() {
 
           {installedModels.length > 0 && (
             <>
-              {/* Tab Navigation */}
-              <div className="ai-tabs-row">
-                <button className={`ai-tab-btn ${activeTab === "chat" ? "active" : ""}`} onClick={() => {setActiveTab("chat"); setAgentMode(false);}}>
-                  <MessageSquare size={14} /> Chat
-                </button>
-                <button className={`ai-tab-btn ${activeTab === "agent" ? "active" : ""}`} onClick={() => {setActiveTab("agent"); setAgentMode(true);}}>
-                  <Sparkles size={14} /> Agent
-                </button>
-                <button className={`ai-tab-btn ${activeTab === "review" ? "active" : ""}`} onClick={() => setActiveTab("review")}>
-                  <Code size={14} /> Review
-                </button>
-                <button className={`ai-tab-btn ${activeTab === "terminal" ? "active" : ""}`} onClick={() => setActiveTab("terminal")}>
-                  <TerminalSquare size={14} /> Terminal
-                </button>
-              </div>
-
-              {/* Tab Content Area */}
+              {/* Main Interaction Area */}
               <div className="chat-messages-scroll">
-                {activeTab === "chat" && (
-                  <>
-                    {messages.length === 0 ? (
-                      <div className="chat-welcome">
-                        <Bot size={40} className="welcome-bot" />
-                        <h3>Welcome to Antigravity AI</h3>
-                        <p>Ask questions, write files, or trigger agent tasks. Mentions like <code>@filename</code> will load file context automatically.</p>
-                      </div>
-                    ) : (
-                      messages.map((m) => <ChatMessage key={m.id} message={m} />)
-                    )}
-                    {isStreaming && (
-                      <div className="assistant-typing">
-                        <span className="dot" />
-                        <span className="dot" />
-                        <span className="dot" />
-                      </div>
-                    )}
-                    <div ref={chatEndRef} />
-                  </>
+                <AgentStatus />
+                
+                {messages.length === 0 ? (
+                  <div className="chat-welcome">
+                    <Bot size={36} className="welcome-bot" />
+                    <h3>Antigravity AI</h3>
+                    <p>Ask anything, create files, run commands.<br/>Use <code>@filename</code> to load file context.</p>
+                    <div className="welcome-hints">
+                      <div className="hint-chip">✦ Write code</div>
+                      <div className="hint-chip">⚡ Run commands</div>
+                      <div className="hint-chip">🔍 Search files</div>
+                    </div>
+                  </div>
+                ) : (
+                  messages.map((m, idx) => (
+                    <ChatMessage
+                      key={m.id}
+                      message={m}
+                      isStreaming={isStreaming && idx === messages.length - 1}
+                    />
+                  ))
                 )}
-
-                {activeTab === "agent" && (
-                  <div className="agent-tab-content">
-                    <AgentStatus />
+                
+                {isStreaming && (
+                  <div className="assistant-typing">
+                    <span className="dot" />
+                    <span className="dot" />
+                    <span className="dot" />
                   </div>
                 )}
-
-                {activeTab === "review" && (
-                  <div className="placeholder-tab-content">
-                    <Code size={32} className="placeholder-icon" />
-                    <p>Code Review tools will appear here when active.</p>
-                  </div>
-                )}
-
-                {activeTab === "terminal" && (
-                  <div className="placeholder-tab-content">
-                    <TerminalSquare size={32} className="placeholder-icon" />
-                    <p>Agent terminal session view.</p>
-                  </div>
-                )}
+                <div ref={chatEndRef} />
               </div>
 
               {/* Chat Input & Mode Controls */}
@@ -356,11 +293,7 @@ export default function AIPanel() {
                     value={inputVal}
                     onChange={(e) => setInputVal(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={
-                      agentMode
-                        ? "Describe an agent task... (use @filename)"
-                        : "Ask AI coding questions... (use @filename)"
-                    }
+                    placeholder="Ask a question or describe an agent task... (use @filename)"
                   />
                   <button
                     className="chat-submit-btn"
@@ -390,43 +323,47 @@ export default function AIPanel() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: var(--space-3) var(--space-4);
+          padding: 0 var(--space-3) 0 var(--space-4);
+          height: 40px;
           background: var(--bg-1);
           border-bottom: 1px solid var(--border-soft);
           flex-shrink: 0;
-          gap: var(--space-2);
         }
 
         .ai-header-left {
           display: flex;
           align-items: center;
           gap: var(--space-2);
+          flex: 1;
         }
 
-        .sparkle-icon {
-          color: var(--accent);
+        .ai-header-right {
+          display: flex;
+          align-items: center;
+          gap: 4px;
         }
 
         .ai-header-title {
           font-size: var(--text-xs);
           font-weight: 700;
-          color: var(--text-muted);
-          letter-spacing: 0.1em;
+          color: var(--accent);
+          letter-spacing: 0.12em;
         }
 
         .model-select {
-          flex: 1;
-          max-width: 140px;
-          background: var(--bg-2);
-          border: 1px solid var(--border-soft);
-          border-radius: 4px;
-          color: var(--text-primary);
-          font-size: var(--text-xs);
-          padding: 2px 6px;
+          max-width: 130px;
+          background: var(--bg-3);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          color: var(--text-secondary);
+          font-size: 11px;
+          padding: 2px 4px;
           outline: none;
+          cursor: pointer;
         }
+        .model-select:focus { border-color: var(--accent); }
 
-        .btn-refresh-connection {
+        .btn-header-action {
           background: transparent;
           border: none;
           color: var(--text-muted);
@@ -435,21 +372,16 @@ export default function AIPanel() {
           align-items: center;
           justify-content: center;
           padding: 4px;
-          border-radius: 4px;
+          border-radius: var(--radius-sm);
+          transition: color var(--trans-fast), background var(--trans-fast);
         }
-
-        .btn-refresh-connection:hover {
+        .btn-header-action:hover {
           color: var(--text-primary);
-          background: rgba(255, 255, 255, 0.05);
+          background: var(--bg-3);
         }
 
-        .spin {
-          animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
         .offline-setup-screen {
           flex: 1;
@@ -609,16 +541,17 @@ export default function AIPanel() {
           text-align: center;
           color: var(--text-muted);
           padding: var(--space-6) var(--space-4);
-          gap: var(--space-2);
+          gap: var(--space-3);
         }
 
         .welcome-bot {
           color: var(--accent);
-          margin-bottom: var(--space-2);
+          opacity: 0.6;
+          margin-bottom: var(--space-1);
         }
 
         .chat-welcome h3 {
-          font-size: var(--text-md);
+          font-size: var(--text-base);
           font-weight: 700;
           color: var(--text-primary);
           margin: 0;
@@ -626,15 +559,35 @@ export default function AIPanel() {
 
         .chat-welcome p {
           font-size: var(--text-sm);
-          line-height: 1.5;
+          line-height: 1.6;
           margin: 0;
+          max-width: 220px;
+        }
+
+        .welcome-hints {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          justify-content: center;
+          margin-top: var(--space-2);
+        }
+
+        .hint-chip {
+          background: var(--bg-3);
+          border: 1px solid var(--border);
+          border-radius: 20px;
+          padding: 3px 10px;
+          font-size: var(--text-xs);
+          color: var(--text-secondary);
         }
 
         .chat-welcome code {
-          background: rgba(255,255,255,0.05);
-          padding: 2px 4px;
-          border-radius: 4px;
+          background: rgba(255,255,255,0.06);
+          padding: 1px 5px;
+          border-radius: 3px;
           color: var(--accent);
+          font-family: var(--font-mono);
+          font-size: 0.9em;
         }
 
         .assistant-typing {
@@ -758,46 +711,7 @@ export default function AIPanel() {
           border: 1px solid var(--border-soft);
         }
 
-        .ai-tabs-row {
-          display: flex;
-          align-items: center;
-          gap: 2px;
-          padding: 0 var(--space-2);
-          border-bottom: 1px solid var(--border-soft);
-          background: var(--bg-2);
-        }
 
-        .ai-tab-btn {
-          background: transparent;
-          border: none;
-          color: var(--text-muted);
-          font-size: 11px;
-          font-weight: 600;
-          padding: var(--space-2) var(--space-3);
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          border-bottom: 2px solid transparent;
-          transition: all 0.2s;
-        }
-
-        .ai-tab-btn:hover {
-          color: var(--text-primary);
-        }
-
-        .ai-tab-btn.active {
-          color: var(--accent);
-          border-bottom-color: var(--accent);
-        }
-
-        .agent-tab-content {
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-4);
-        }
-
-        .agent-tasks-placeholder {
           background: rgba(0,0,0,0.1);
           border: 1px solid var(--border-soft);
           border-radius: 6px;

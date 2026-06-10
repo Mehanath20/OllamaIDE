@@ -132,6 +132,8 @@ export const useAIStore = create<AIState>((set) => ({
       pendingCommand: null,
       commandPermissionResolve: null,
       filePermissionResolve: null,
+      // NOTE: messages are intentionally NOT cleared here.
+      // Call clearMessages() explicitly if you want to reset conversation history.
     }),
   setPendingFileChange: (pendingFileChange) => set({ pendingFileChange }),
   setPendingCommand: (pendingCommand) => set({ pendingCommand }),

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Search, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 import { useFileStore } from "../../store/fileStore";
 import { useEditorStore } from "../../store/editorStore";
 import { getLanguageFromExt } from "../../lib/fileIcons";

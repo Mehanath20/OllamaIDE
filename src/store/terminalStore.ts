@@ -19,8 +19,7 @@ export interface ShellProfile {
 }
 
 // Platform-aware shell profiles
-const IS_WINDOWS = navigator.userAgent.includes("Windows") ||
-  (navigator.platform && navigator.platform.startsWith("Win"));
+const IS_WINDOWS = navigator.userAgent.toLowerCase().includes("windows");
 
 export const SHELL_PROFILES: ShellProfile[] = IS_WINDOWS
   ? [

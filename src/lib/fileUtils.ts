@@ -10,6 +10,31 @@ import { useFileStore, FileNode } from "../store/fileStore";
 import { useTerminalStore } from "../store/terminalStore";
 
 /**
+ * Trigger a file tree refresh for the given root.
+ * Called by the agent after write_file to update the Explorer.
+ */
+export async function list_dir_recursive(rootPath: string): Promise<void> {
+  try {
+    const entries = await invoke<{ name: string; path: string; is_dir: boolean; size?: number }[]>(
+      "list_dir",
+      { path: rootPath }
+    );
+    const tree: FileNode[] = entries.map((e) => ({
+      name: e.name,
+      path: e.path,
+      isDir: e.is_dir,
+      size: e.size,
+      children: undefined,
+      expanded: false,
+    }));
+    useFileStore.getState().setTree(tree);
+  } catch (err) {
+    console.warn("list_dir_recursive failed:", err);
+  }
+}
+
+
+/**
  * Textually serialize the workspace directory tree up to 3 levels deep.
  */
 export function serializeWorkspaceTree(nodes: FileNode[], depth = 0): string {

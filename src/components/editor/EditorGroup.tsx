@@ -5,11 +5,11 @@
 
 import { useEditorStore } from "../../store/editorStore";
 import { useUIStore } from "../../store/uiStore";
-import { useAIStore } from "../../store/aiStore";
+
 import EditorTabs from "./EditorTabs";
 import Breadcrumb from "./Breadcrumb";
 import MonacoEditor from "./MonacoEditor";
-import { FolderOpen, Sparkles, MessageSquare, Wrench, Zap, FileText, CheckCircle2 } from "lucide-react";
+import { FolderOpen, MessageSquare, Wrench, Zap, FileText, CheckCircle2 } from "lucide-react";
 
 export default function EditorGroup() {
   const { openFiles, activeFile } = useEditorStore();
