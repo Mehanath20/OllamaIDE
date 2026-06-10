@@ -91,7 +91,7 @@ export default function ChatMessage({ message, isStreaming = false }: Props) {
   // Strip workspace context from user messages for display (it's internal)
   let userDisplayContent = content;
   if (isUser) {
-    userDisplayContent = content.replace(/\n\n=== Workspace ===[^]*$/, "").trim();
+    userDisplayContent = content.replace(/\n+\[(?:Active file|Workspace):[^]*$/, "").trim();
   }
 
   return (
@@ -113,49 +113,48 @@ export default function ChatMessage({ message, isStreaming = false }: Props) {
       <style>{`
         .msg-wrapper {
           display: flex;
-          gap: 10px;
-          padding: 10px var(--space-4);
+          gap: 12px;
+          padding: 12px var(--space-4);
           max-width: 100%;
           animation: msgIn 120ms ease both;
         }
         @keyframes msgIn {
-          from { opacity: 0; transform: translateY(4px); }
+          from { opacity: 0; transform: translateY(6px); }
           to   { opacity: 1; transform: translateY(0); }
         }
         .msg-wrapper--user {
           flex-direction: row-reverse;
         }
         .msg-wrapper--system {
-          padding: 4px var(--space-4);
+          padding: 6px var(--space-4);
+          justify-content: center;
         }
         .msg-avatar {
-          width: 26px;
-          height: 26px;
-          border-radius: 6px;
+          width: 28px;
+          height: 28px;
+          border-radius: 8px;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 13px;
+          font-size: 14px;
           flex-shrink: 0;
           margin-top: 2px;
         }
         .msg-avatar--user {
-          background: var(--accent);
+          background: linear-gradient(135deg, var(--accent), #4f46e5);
           color: white;
-          font-size: 11px;
+          font-size: 12px;
+          box-shadow: 0 2px 8px var(--accent-soft);
         }
         .msg-avatar--assistant {
-          background: #1a1a2e;
-          border: 1px solid rgba(124,58,237,0.3);
+          background: #121212;
+          border: 1px solid rgba(124,58,237,0.4);
           color: var(--accent);
-          font-size: 15px;
+          font-size: 16px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.2);
         }
         .msg-avatar--system {
-          background: transparent;
-          color: var(--text-muted);
-          font-size: 11px;
-          width: 20px;
-          height: 20px;
+          display: none; /* Hide avatar for system messages, we center them instead */
         }
         .msg-bubble {
           flex: 1;
@@ -166,16 +165,16 @@ export default function ChatMessage({ message, isStreaming = false }: Props) {
           overflow-x: auto;
         }
         .msg-bubble--user {
-          background: rgba(124, 58, 237, 0.08);
-          border: 1px solid rgba(124, 58, 237, 0.2);
-          border-radius: 10px 10px 2px 10px;
-          padding: var(--space-2) var(--space-3);
-        }
-        .msg-bubble--assistant {
-          padding: 2px 0;
+          background: rgba(124, 58, 237, 0.1);
+          border: 1px solid rgba(124, 58, 237, 0.25);
+          border-radius: 12px 12px 2px 12px;
+          padding: 10px 14px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
         .msg-bubble--system {
-          padding: 2px 0;
+          max-width: 100%;
+          display: flex;
+          justify-content: center;
         }
         .user-text {
           white-space: pre-wrap;
@@ -221,36 +220,51 @@ function SystemMessageContent({ content }: { content: string }) {
         .sys-msg {
           display: flex;
           flex-direction: column;
-          gap: 4px;
-          opacity: 0.8;
+          gap: 6px;
+          background: var(--bg-2);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-md);
+          padding: 8px 12px;
+          width: 100%;
+          max-width: 400px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+          transition: border-color var(--trans-fast);
         }
-        .sys-msg:hover { opacity: 1; }
+        .sys-msg:hover { border-color: var(--border-soft); }
+        .sys-msg--error { border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05); }
         .sys-msg--error .sys-label { color: var(--error); }
         .sys-msg-header {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 8px;
           background: transparent;
           border: none;
-          color: var(--text-muted);
-          font-size: var(--text-xs);
+          color: var(--text-secondary);
+          font-size: 11px;
           font-family: var(--font-ui);
           text-align: left;
           padding: 0;
+          outline: none;
         }
         .sys-icon { display: flex; align-items: center; color: var(--text-muted); }
         .sys-icon--success { color: var(--green); }
         .sys-icon--error   { color: var(--error); }
         .sys-label {
           font-weight: 600;
-          letter-spacing: 0.03em;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
         }
-        .sys-toggle { font-size: 8px; margin-left: auto; }
-        .sys-body { margin-top: 4px; }
+        .sys-toggle { font-size: 9px; margin-left: auto; color: var(--text-muted); }
+        .sys-body { 
+          margin-top: 4px;
+          background: var(--bg-0);
+          border-radius: var(--radius-sm);
+          padding: 4px;
+        }
         .sys-inline-body {
-          font-size: var(--text-xs);
-          color: var(--text-muted);
-          padding-left: 20px;
+          font-size: 12px;
+          color: var(--text-primary);
+          line-height: 1.5;
           white-space: pre-wrap;
           word-break: break-word;
         }
