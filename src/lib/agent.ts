@@ -1,14 +1,9 @@
 /* ============================================================
-   agent.ts — Offline AI Coding Agent Engine.
-   Implements the Read-Think-Act-Repeat loop. Parses system
-   tags for plan, think, read_file, write_file, and run_command.
-
-   FIXES APPLIED:
-   - Context injection only on first user turn (not every turn)
-   - Message history sliding window to prevent context overflow
-   - clearAgentState no longer wipes message history
-   - File tree refresh after every write_file
-   - Windows-safe path resolution (uses backslash normalization)
+   agent.ts — Antigravity IDE Agent Engine
+   
+   This is an autonomous coding agent that ACTS immediately.
+   It does NOT describe steps — it performs them directly using
+   XML action tags that the system parses and executes.
    ============================================================ */
 import { invoke } from "@tauri-apps/api/core";
 import { useAIStore, ChatMessage, AgentStep } from "../store/aiStore";
@@ -17,84 +12,115 @@ import { useEditorStore } from "../store/editorStore";
 import { chatOllama } from "./ollama";
 import { getWorkspaceContext } from "./fileUtils";
 
-// Max messages kept in sliding context window (user + assistant pairs)
+// Max messages kept in sliding context window
 const MAX_HISTORY_MESSAGES = 20;
 
-const AGENT_SYSTEM_PROMPT = `You are Antigravity, an AI coding assistant integrated into an offline IDE.
-You help users write code, fix bugs, read files, create files, and run terminal commands.
+const AGENT_SYSTEM_PROMPT = `You are Antigravity, an autonomous AI coding agent inside an IDE.
+You have DIRECT access to the filesystem and terminal. You DO NOT explain — you ACT.
 
-You have access to the following XML-like action tags. Use EXACTLY ONE per response when needed:
+CRITICAL RULE: When asked to create a file, write code, or do any filesystem task:
+  → IMMEDIATELY use the appropriate action tag. Do NOT describe what you will do.
+  → Do NOT say "Here's how to do it" or "You can do this by..."
+  → Do NOT ask the user to create files themselves.
+  → Just use the tag and do it NOW.
 
-1. Read a file:
-<read_file path="relative/path/to/file"/>
+## ACTION TAGS (use exactly one per response turn):
 
-2. Write or overwrite a file:
-<write_file path="relative/path/to/file">
+### Create or overwrite a file:
+<write_file path="filename.ext">
 file contents here
 </write_file>
 
-3. Run a shell command:
-<run_command>command_to_run</run_command>
+### Read a file:
+<read_file path="filename.ext"/>
 
-4. List a directory:
-<list_dir path="relative/path/to/dir"/>
+### Run a terminal command:
+<run_command>command here</run_command>
 
-5. Search across files:
-<search_files query="search_term" path="relative/path/to/search"/>
+### List directory contents:
+<list_dir path="path/to/dir"/>
 
-6. Think and plan:
-<think>your reasoning process</think>
+### Search in files:
+<search_files query="search term" path="."/>
 
-7. Show checklist:
-<plan>
-- [ ] step 1
-- [ ] step 2
-</plan>
+### Think before acting (optional reasoning):
+<think>
+brief reasoning
+</think>
 
-RULES:
-- If the user is chatting or asking a question, reply conversationally WITHOUT any action tags.
-- If you need to perform a file/shell action, use ONE action tag and stop generating. Wait for the system result.
-- After using an action tag, do not repeat the same action. Proceed to the next step.
-- Do not make up file contents — read first if unsure.
-- When the task is complete, say "Task complete" or summarize what you did.
-- Keep responses concise and professional.
+## EXAMPLES OF CORRECT BEHAVIOR:
+
+User: "create a python file that prints hello world"
+CORRECT response:
+<write_file path="hello.py">
+print("Hello, World!")
+</write_file>
+
+User: "create a rust program to print my name is john"
+CORRECT response:
+<write_file path="main.rs">
+fn main() {
+    println!("My name is John");
+}
+</write_file>
+
+User: "create a file called solution.py with a class that sorts a list"
+CORRECT response:
+<write_file path="solution.py">
+class Solution:
+    def sort_list(self, nums):
+        return sorted(nums)
+</write_file>
+
+## RULES:
+1. File creation/editing tasks → use <write_file> IMMEDIATELY, no preamble.
+2. Use the filename the user specifies. If none given, pick a sensible name.
+3. If the user just wants to chat or ask a question → respond with text only (no tags).
+4. After a file action completes, briefly confirm what you did (1-2 sentences max).
+5. File paths are relative to the workspace root. Use simple filenames (e.g. "hello.py" not "./src/hello.py") unless the user specifies otherwise.
+6. For multi-file tasks: handle one file per turn. The system will call you again for the next step.
 `;
 
 /**
- * Executes a terminal command using the custom Rust backend command.
- */
-async function runShellCommand(cmd: string): Promise<string> {
-  const cwd = useFileStore.getState().workspaceRoot || ".";
-  try {
-    const output = await invoke<string>("execute_shell", { cmd, cwd });
-    return output;
-  } catch (err: any) {
-    return `Error executing command: ${err.message || err}`;
-  }
-}
-
-/**
- * Normalize a path for the current OS.
- * Joins workspaceRoot + relative path safely.
+ * Resolve an absolute path from workspace root + relative path.
+ * Handles both Windows (backslash) and Unix (forward slash) paths.
  */
 function resolvePath(workspaceRoot: string, relativePath: string): string {
-  // Normalize slashes: on Windows, use backslashes in the Rust layer
-  // The Rust backend handles both, but we normalize here for consistency
-  const separator = workspaceRoot.includes("\\") ? "\\" : "/";
-  
-  // If the path is already absolute, return as-is
+  // Already absolute? Return as-is
   if (relativePath.startsWith("/") || /^[A-Za-z]:/.test(relativePath)) {
-    return relativePath.replace(/[/\\]/g, separator);
+    return relativePath;
   }
-  
-  // Remove leading ./ from relative path
-  const cleanRelative = relativePath.replace(/^\.\//, "");
-  
-  return `${workspaceRoot}${separator}${cleanRelative}`.replace(/[/\\]{2,}/g, separator);
+
+  // Remove leading ./ or ./
+  const clean = relativePath.replace(/^\.\//, "").replace(/^\.\\/, "");
+
+  // Detect Windows path separator from root
+  const sep = workspaceRoot.includes("\\") ? "\\" : "/";
+
+  return `${workspaceRoot}${sep}${clean}`;
 }
 
 /**
- * Parses markdown-like checklist plan.
+ * Get the effective workspace root for file operations.
+ * Falls back to the OS temp/documents directory if no workspace is open.
+ */
+function getWorkspaceRoot(): string {
+  const storeRoot = useFileStore.getState().workspaceRoot;
+  if (storeRoot) return storeRoot;
+
+  // No workspace open — use the active file's directory as context
+  const activeFile = useEditorStore.getState().activeFile;
+  if (activeFile) {
+    const parts = activeFile.split(/[/\\]/);
+    parts.pop();
+    return parts.join("\\") || "C:\\Users\\Public\\Documents";
+  }
+
+  return "";
+}
+
+/**
+ * Parse markdown-like checklist plan.
  */
 function parsePlan(text: string): AgentStep[] {
   const planRegex = /<plan>([\s\S]*?)<\/plan>/;
@@ -118,24 +144,37 @@ function parsePlan(text: string): AgentStep[] {
       });
     }
   }
-
   return steps;
 }
 
 /**
- * Trims message history to the sliding window size.
- * Always keeps the first user message (which has workspace context).
+ * Trim message history to prevent context window overflow.
+ * Always keeps the first message (initial context) + last N messages.
  */
 function trimHistory(messages: ChatMessage[]): ChatMessage[] {
   if (messages.length <= MAX_HISTORY_MESSAGES) return messages;
-  // Keep the first message (with workspace context) + the last N messages
   const firstMsg = messages[0];
-  const tail = messages.slice(-MAX_HISTORY_MESSAGES + 1);
+  const tail = messages.slice(-(MAX_HISTORY_MESSAGES - 1));
   return [firstMsg, ...tail];
 }
 
 /**
- * Triggers a single turn of the agent conversation loop.
+ * Execute a shell command via the Rust backend.
+ */
+async function runShellCommand(cmd: string): Promise<string> {
+  const cwd = getWorkspaceRoot() || ".";
+  try {
+    return await invoke<string>("execute_shell", { cmd, cwd });
+  } catch (err: any) {
+    return `Error: ${err.message || err}`;
+  }
+}
+
+// ─── Main Agent Entry Point ─────────────────────────────────────────────────
+
+/**
+ * Run one turn of the agent conversation loop.
+ * @param userQuery - The user's message. Pass null for continuation turns.
  */
 export async function runAgentTurn(userQuery: string | null): Promise<void> {
   const aiStore = useAIStore.getState();
@@ -146,63 +185,70 @@ export async function runAgentTurn(userQuery: string | null): Promise<void> {
 
   let currentHistory: ChatMessage[] = [...aiStore.messages];
 
-  // 1. If userQuery is provided, this is the start of a new task.
+  // ── Start of new user task ───────────────────────────────────────────────
   if (userQuery) {
-    // Only clear agent steps/logs, NOT message history (preserve conversation context)
+    // Clear agent state (steps/logs) but preserve message history for context
     aiStore.clearAgentState();
 
-    // Gather workspace context ONLY for the initial user message
-    const workspaceContext = getWorkspaceContext();
-    let contextStr = `\n\n=== Workspace ===\n`;
-    if (workspaceContext.activeFile.path) {
-      contextStr += `Active file: ${workspaceContext.activeFile.path}\n`;
-      if (workspaceContext.activeFile.content) {
-        contextStr += `\`\`\`\n${workspaceContext.activeFile.content.slice(0, 3000)}\n\`\`\`\n`;
+    // Gather workspace context for the first message only
+    const workspaceCtx = getWorkspaceContext();
+    let contextStr = "";
+
+    if (workspaceCtx.activeFile.path) {
+      contextStr += `\n\n[Active file: ${workspaceCtx.activeFile.path}]`;
+      if (workspaceCtx.activeFile.content) {
+        // Limit context to 2000 chars to save tokens
+        const preview = workspaceCtx.activeFile.content.slice(0, 2000);
+        contextStr += `\n\`\`\`\n${preview}\n\`\`\``;
       }
     }
-    if (workspaceContext.fileTree) {
-      contextStr += `File tree:\n${workspaceContext.fileTree}\n`;
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (workspaceRoot) {
+      contextStr += `\n[Workspace: ${workspaceRoot}]`;
+      if (workspaceCtx.fileTree) {
+        contextStr += `\n[Files:\n${workspaceCtx.fileTree.slice(0, 800)}]`;
+      }
     }
 
-    const initialUserMessage: ChatMessage = {
+    const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      content: `${userQuery}${contextStr}`,
+      content: userQuery + contextStr,
       timestamp: Date.now(),
     };
 
-    aiStore.addMessage(initialUserMessage);
-    currentHistory.push(initialUserMessage);
+    aiStore.addMessage(userMsg);
+    currentHistory.push(userMsg);
   }
 
-  // Apply sliding window to prevent context overflow
+  // Apply sliding window
   const trimmedHistory = trimHistory(currentHistory);
 
-  // Build the full chat payload with system prompt at head
-  const chatMessages = [
+  // Build chat payload — system prompt always first
+  const chatPayload = [
     { role: "system" as const, content: AGENT_SYSTEM_PROMPT },
     ...trimmedHistory
-      .filter((m) => m.role !== "system") // Don't double-include system messages from history display
-      .map((m) => ({ role: m.role, content: m.content })),
+      .filter((m) => m.role !== "system")
+      .map((m) => ({ role: m.role as "user" | "assistant" | "system", content: m.content })),
   ];
 
-  // Add a blank placeholder assistant message for streaming
+  // Add placeholder for streaming assistant message
   const assistantMsgId = `assistant-${Date.now()}`;
-  const assistantMessage: ChatMessage = {
+  const assistantMsg: ChatMessage = {
     id: assistantMsgId,
     role: "assistant",
     content: "",
     timestamp: Date.now(),
   };
-  aiStore.addMessage(assistantMessage);
-
+  aiStore.addMessage(assistantMsg);
   aiStore.setAgentStatus("thinking");
   aiStore.addAgentLog("Thinking...");
 
   let fullContent = "";
 
   try {
-    await chatOllama(sessionId, model, chatMessages, (chunk, done) => {
+    await chatOllama(sessionId, model, chatPayload, (chunk, done) => {
       fullContent += chunk;
       aiStore.updateLastMessageContent(fullContent);
 
@@ -215,251 +261,264 @@ export async function runAgentTurn(userQuery: string | null): Promise<void> {
     aiStore.setStreaming(false);
     aiStore.setAgentStatus("idle");
     aiStore.addAgentLog(`Error: ${err.message || err}`);
-    aiStore.updateLastMessageContent(`An error occurred: ${err.message || err}`);
+    aiStore.updateLastMessageContent(
+      `⚠️ Error connecting to Ollama: ${err.message || err}\n\nMake sure Ollama is running and a model is loaded.`
+    );
   }
 }
 
-/**
- * Handle a complete generation from the Agent
- */
-async function handleCompletedTurn(content: string) {
-  const aiStore = useAIStore.getState();
-  aiStore.addAgentLog("Analyzing response...");
+// ─── Handle Completed Agent Turn ───────────────────────────────────────────
 
-  // Parse plan if present
+async function handleCompletedTurn(content: string): Promise<void> {
+  const aiStore = useAIStore.getState();
+  aiStore.addAgentLog("Parsing response...");
+
+  // Parse checklist plan if present
   const steps = parsePlan(content);
   if (steps.length > 0) {
     aiStore.setAgentSteps(steps);
   }
 
-  // Parse actions (only first match per turn — one action at a time)
-  const readFileRegex = /<read_file\s+path="([^"]+)"\s*\/>/;
-  const writeFileRegex = /<write_file\s+path="([^"]+)">([\s\S]*?)<\/write_file>/;
-  const runCommandRegex = /<run_command>([\s\S]*?)<\/run_command>/;
-  const listDirRegex = /<list_dir\s+path="([^"]+)"\s*\/>/;
-  const searchFilesRegex = /<search_files\s+query="([^"]+)"\s+path="([^"]+)"\s*\/>/;
+  // ── Regex patterns for each action tag ──────────────────────────────────
+  const writeFileRx   = /<write_file\s+path="([^"]+)">([\s\S]*?)<\/write_file>/;
+  const readFileRx    = /<read_file\s+path="([^"]+)"\s*\/>/;
+  const runCommandRx  = /<run_command>([\s\S]*?)<\/run_command>/;
+  const listDirRx     = /<list_dir\s+path="([^"]+)"\s*\/>/;
+  const searchRx      = /<search_files\s+query="([^"]+)"\s+path="([^"]+)"\s*\/>/;
 
-  const readMatch = content.match(readFileRegex);
-  const writeMatch = content.match(writeFileRegex);
-  const runMatch = content.match(runCommandRegex);
-  const listDirMatch = content.match(listDirRegex);
-  const searchMatch = content.match(searchFilesRegex);
+  const writeMatch   = content.match(writeFileRx);
+  const readMatch    = content.match(readFileRx);
+  const runMatch     = content.match(runCommandRx);
+  const listDirMatch = content.match(listDirRx);
+  const searchMatch  = content.match(searchRx);
 
-  // ── 1. Read File ─────────────────────────────────────────────
+  // ── 1. WRITE FILE ────────────────────────────────────────────────────────
+  if (writeMatch) {
+    const targetPath = writeMatch[1].trim();
+    const fileContent = writeMatch[2].replace(/^\n/, ""); // strip leading newline
+
+    aiStore.setAgentStatus("generating");
+    aiStore.addAgentLog(`Writing file: ${targetPath}`);
+
+    try {
+      const workspaceRoot = getWorkspaceRoot();
+      const absolutePath = workspaceRoot
+        ? resolvePath(workspaceRoot, targetPath)
+        : targetPath;
+
+      // Write file to disk via Rust backend
+      await invoke("write_file", { path: absolutePath, content: fileContent });
+      aiStore.addAgentLog(`✓ Created: ${targetPath}`);
+
+      // Refresh file tree in Explorer
+      if (workspaceRoot) {
+        try {
+          const entries = await invoke<{ name: string; path: string; is_dir: boolean; size?: number }[]>(
+            "list_dir", { path: workspaceRoot }
+          );
+          const { setTree } = useFileStore.getState();
+          setTree(entries.map((e) => ({
+            name: e.name,
+            path: e.path,
+            isDir: e.is_dir,
+            size: e.size,
+            children: undefined,
+            expanded: false,
+          })));
+        } catch {}
+      }
+
+      // Determine language from extension
+      const ext = targetPath.split(".").pop() || "";
+      const langMap: Record<string, string> = {
+        ts: "typescript", tsx: "typescriptreact", js: "javascript", jsx: "javascriptreact",
+        py: "python", rs: "rust", go: "go", java: "java", cpp: "cpp", c: "c",
+        cs: "csharp", rb: "ruby", php: "php", html: "html", css: "css",
+        json: "json", yaml: "yaml", yml: "yaml", md: "markdown", sh: "shell",
+        bash: "shell", toml: "toml", sql: "sql", kt: "kotlin", swift: "swift",
+      };
+      const language = langMap[ext.toLowerCase()] || "plaintext";
+
+      // Open the file in the editor
+      const editorStore = useEditorStore.getState();
+      const fileName = targetPath.split(/[/\\]/).pop() || targetPath;
+
+      // Update if already open, otherwise open fresh
+      const existingFile = editorStore.openFiles.find((f) => f.path === absolutePath);
+      if (existingFile) {
+        editorStore.updateContent(absolutePath, fileContent);
+        editorStore.setActiveFile(absolutePath);
+        editorStore.markSaved(absolutePath);
+      } else {
+        editorStore.openFile({
+          path: absolutePath,
+          name: fileName,
+          content: fileContent,
+          language,
+          isDirty: false,
+        });
+      }
+
+      // Post system confirmation
+      const sysMsg: ChatMessage = {
+        id: `sys-${Date.now()}`,
+        role: "system",
+        content: `[write_file]: Created "${targetPath}" (${fileContent.length} chars) and opened in editor.`,
+        timestamp: Date.now(),
+      };
+      aiStore.addMessage(sysMsg);
+
+    } catch (err: any) {
+      aiStore.addAgentLog(`✗ Failed: ${err.message || err}`);
+      aiStore.addMessage({
+        id: `sys-${Date.now()}`,
+        role: "system",
+        content: `[write_file error]: Could not write "${targetPath}": ${err.message || err}`,
+        timestamp: Date.now(),
+      });
+    }
+
+    // Continue the agent loop for next steps
+    setTimeout(() => runAgentTurn(null), 400);
+    return;
+  }
+
+  // ── 2. READ FILE ─────────────────────────────────────────────────────────
   if (readMatch) {
-    const targetPath = readMatch[1];
+    const targetPath = readMatch[1].trim();
     aiStore.setAgentStatus("reading");
     aiStore.addAgentLog(`Reading: ${targetPath}`);
 
     let fileContent = "";
     try {
-      const workspaceRoot = useFileStore.getState().workspaceRoot || "";
+      const workspaceRoot = getWorkspaceRoot();
       const absolutePath = workspaceRoot ? resolvePath(workspaceRoot, targetPath) : targetPath;
       fileContent = await invoke<string>("read_file", { path: absolutePath });
-      aiStore.addAgentLog(`✓ Read: ${targetPath}`);
+      aiStore.addAgentLog(`✓ Read ${fileContent.length} chars`);
     } catch (err: any) {
       fileContent = `Error reading file: ${err.message || err}`;
-      aiStore.addAgentLog(`✗ Read failed: ${targetPath}`);
+      aiStore.addAgentLog(`✗ Read failed`);
     }
 
-    const systemMessage: ChatMessage = {
+    aiStore.addMessage({
       id: `sys-${Date.now()}`,
       role: "system",
-      content: `[read_file result for "${targetPath}"]:\n\`\`\`\n${fileContent}\n\`\`\``,
+      content: `[read_file "${targetPath}"]:\n\`\`\`\n${fileContent}\n\`\`\``,
       timestamp: Date.now(),
-    };
-    aiStore.addMessage(systemMessage);
-    setTimeout(() => runAgentTurn(null), 500);
+    });
+    setTimeout(() => runAgentTurn(null), 400);
     return;
   }
 
-  // ── 2. Write File ────────────────────────────────────────────
-  if (writeMatch) {
-    const targetPath = writeMatch[1];
-    const newContent = writeMatch[2].replace(/^\n/, ""); // strip leading newline
-    aiStore.setAgentStatus("generating");
-    aiStore.addAgentLog(`Writing: ${targetPath}`);
-
-    try {
-      const workspaceRoot = useFileStore.getState().workspaceRoot || "";
-      const absolutePath = workspaceRoot ? resolvePath(workspaceRoot, targetPath) : targetPath;
-
-      await invoke("write_file", { path: absolutePath, content: newContent });
-      aiStore.addAgentLog(`✓ Wrote: ${targetPath}`);
-
-      // Refresh the file tree so the new file appears in Explorer
-      if (workspaceRoot) {
-        const { list_dir_recursive } = await import("../lib/fileUtils");
-        list_dir_recursive(workspaceRoot);
-      }
-
-      // Update editor if file is open, otherwise open it
-      const editorStore = useEditorStore.getState();
-      const openFile = editorStore.openFiles.find(
-        (f) => f.path === absolutePath || f.path === targetPath
-      );
-
-      if (openFile) {
-        editorStore.updateContent(openFile.path, newContent);
-      } else {
-        const name = targetPath.split(/[/\\]/).pop() || targetPath;
-        const ext = name.split(".").pop() || "";
-        const { getLanguageFromExt } = await import("../lib/fileIcons");
-        editorStore.openFile({
-          path: absolutePath,
-          name,
-          content: newContent,
-          language: getLanguageFromExt(ext),
-          isDirty: false,
-        });
-      }
-
-      const systemMessage: ChatMessage = {
-        id: `sys-${Date.now()}`,
-        role: "system",
-        content: `[write_file]: Successfully wrote "${targetPath}" (${newContent.length} chars)`,
-        timestamp: Date.now(),
-      };
-      aiStore.addMessage(systemMessage);
-    } catch (err: any) {
-      aiStore.addAgentLog(`✗ Write failed: ${targetPath}: ${err.message || err}`);
-      const systemMessage: ChatMessage = {
-        id: `sys-${Date.now()}`,
-        role: "system",
-        content: `[write_file error]: Failed to write "${targetPath}": ${err.message || err}`,
-        timestamp: Date.now(),
-      };
-      aiStore.addMessage(systemMessage);
-    }
-
-    setTimeout(() => runAgentTurn(null), 500);
-    return;
-  }
-
-  // ── 3. Run Command ───────────────────────────────────────────
+  // ── 3. RUN COMMAND ───────────────────────────────────────────────────────
   if (runMatch) {
     const cmd = runMatch[1].trim();
     aiStore.setAgentStatus("executing");
-    aiStore.addAgentLog(`Requesting command: ${cmd}`);
-
+    aiStore.addAgentLog(`Awaiting approval: ${cmd}`);
     aiStore.setPendingCommand(cmd);
 
-    const cmdPromise = new Promise<boolean>((resolve) => {
+    const approved = await new Promise<boolean>((resolve) => {
       aiStore.setCommandPermissionResolve(resolve);
     });
 
-    const approved = await cmdPromise;
     aiStore.setPendingCommand(null);
     aiStore.setCommandPermissionResolve(null);
 
     if (approved) {
       aiStore.addAgentLog(`Executing: ${cmd}`);
       const output = await runShellCommand(cmd);
-      aiStore.addAgentLog(`✓ Command complete`);
-
-      const systemMessage: ChatMessage = {
+      aiStore.addAgentLog(`✓ Done`);
+      aiStore.addMessage({
         id: `sys-${Date.now()}`,
         role: "system",
-        content: `[run_command result for \`${cmd}\`]:\n\`\`\`\n${output}\n\`\`\``,
+        content: `[run_command \`${cmd}\`]:\n\`\`\`\n${output}\n\`\`\``,
         timestamp: Date.now(),
-      };
-      aiStore.addMessage(systemMessage);
+      });
     } else {
-      aiStore.addAgentLog(`Command rejected by user`);
-      const systemMessage: ChatMessage = {
+      aiStore.addAgentLog(`Rejected by user`);
+      aiStore.addMessage({
         id: `sys-${Date.now()}`,
         role: "system",
-        content: `[run_command]: User rejected executing \`${cmd}\`.`,
+        content: `[run_command]: User rejected \`${cmd}\`.`,
         timestamp: Date.now(),
-      };
-      aiStore.addMessage(systemMessage);
+      });
     }
 
-    setTimeout(() => runAgentTurn(null), 500);
+    setTimeout(() => runAgentTurn(null), 400);
     return;
   }
 
-  // ── 4. List Directory ────────────────────────────────────────
+  // ── 4. LIST DIRECTORY ────────────────────────────────────────────────────
   if (listDirMatch) {
-    const targetPath = listDirMatch[1];
+    const targetPath = listDirMatch[1].trim();
     aiStore.setAgentStatus("reading");
     aiStore.addAgentLog(`Listing: ${targetPath}`);
 
-    let dirContent = "";
+    let output = "";
     try {
-      const workspaceRoot = useFileStore.getState().workspaceRoot || "";
+      const workspaceRoot = getWorkspaceRoot();
       const absolutePath = workspaceRoot ? resolvePath(workspaceRoot, targetPath) : targetPath;
-
       const entries: any[] = await invoke("list_dir", { path: absolutePath });
-      dirContent = entries
-        .map((e) => `${e.is_dir ? "📁" : "📄"} ${e.name}${e.size ? ` (${e.size}b)` : ""}`)
-        .join("\n");
-      if (!dirContent) dirContent = "(empty directory)";
-      aiStore.addAgentLog(`✓ Listed: ${targetPath}`);
+      output = entries.map((e) => `${e.is_dir ? "📁" : "📄"} ${e.name}`).join("\n") || "(empty)";
+      aiStore.addAgentLog(`✓ Listed ${entries.length} entries`);
     } catch (err: any) {
-      dirContent = `Error: ${err.message || err}`;
-      aiStore.addAgentLog(`✗ List failed: ${targetPath}`);
+      output = `Error: ${err.message || err}`;
     }
 
-    const systemMessage: ChatMessage = {
+    aiStore.addMessage({
       id: `sys-${Date.now()}`,
       role: "system",
-      content: `[list_dir result for "${targetPath}"]:\n\`\`\`\n${dirContent}\n\`\`\``,
+      content: `[list_dir "${targetPath}"]:\n\`\`\`\n${output}\n\`\`\``,
       timestamp: Date.now(),
-    };
-    aiStore.addMessage(systemMessage);
-    setTimeout(() => runAgentTurn(null), 500);
+    });
+    setTimeout(() => runAgentTurn(null), 400);
     return;
   }
 
-  // ── 5. Search Files ──────────────────────────────────────────
+  // ── 5. SEARCH FILES ──────────────────────────────────────────────────────
   if (searchMatch) {
     const query = searchMatch[1];
     const targetPath = searchMatch[2];
     aiStore.setAgentStatus("reading");
-    aiStore.addAgentLog(`Searching "${query}" in ${targetPath}`);
+    aiStore.addAgentLog(`Searching "${query}"...`);
 
-    let searchContent = "";
+    let output = "";
     try {
-      const workspaceRoot = useFileStore.getState().workspaceRoot || "";
+      const workspaceRoot = getWorkspaceRoot();
       const absolutePath = workspaceRoot ? resolvePath(workspaceRoot, targetPath) : targetPath;
-
       const results: any[] = await invoke("search_files", { path: absolutePath, query });
-      searchContent = results.length === 0
+      output = results.length === 0
         ? "No results found."
         : results.map((r) => `${r.file}:${r.line} — ${r.text}`).join("\n");
-      aiStore.addAgentLog(`✓ Search done: ${results.length} results`);
+      aiStore.addAgentLog(`✓ ${results.length} results`);
     } catch (err: any) {
-      searchContent = `Error: ${err.message || err}`;
-      aiStore.addAgentLog(`✗ Search failed`);
+      output = `Error: ${err.message || err}`;
     }
 
-    const systemMessage: ChatMessage = {
+    aiStore.addMessage({
       id: `sys-${Date.now()}`,
       role: "system",
-      content: `[search_files result for "${query}" in "${targetPath}"]:\n\`\`\`\n${searchContent}\n\`\`\``,
+      content: `[search_files "${query}"]:\n\`\`\`\n${output}\n\`\`\``,
       timestamp: Date.now(),
-    };
-    aiStore.addMessage(systemMessage);
-    setTimeout(() => runAgentTurn(null), 500);
+    });
+    setTimeout(() => runAgentTurn(null), 400);
     return;
   }
 
-  // ── 6. Plan only (no action yet) ────────────────────────────
+  // ── 6. Plan only — kick off execution ────────────────────────────────────
   if (steps.length > 0) {
-    aiStore.addAgentLog("Plan ready — starting execution...");
-    const systemMessage: ChatMessage = {
+    aiStore.addAgentLog("Plan ready — executing...");
+    aiStore.addMessage({
       id: `sys-${Date.now()}`,
       role: "system",
-      content: `[system]: Plan created. Execute each step using the action tags.`,
+      content: "[system]: Plan created. Proceeding with execution.",
       timestamp: Date.now(),
-    };
-    aiStore.addMessage(systemMessage);
-    setTimeout(() => runAgentTurn(null), 500);
+    });
+    setTimeout(() => runAgentTurn(null), 400);
     return;
   }
 
-  // ── 7. No action — conversation complete ──────────────────────
+  // ── 7. Pure conversation — no action ─────────────────────────────────────
   aiStore.setAgentStatus("idle");
   aiStore.addAgentLog("Done.");
 }

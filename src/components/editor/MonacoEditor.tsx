@@ -23,8 +23,27 @@ interface Props {
 export default function MonacoEditor({ path, content, language }: Props) {
   const monaco = useMonaco();
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const lastExternalContent = useRef<string>(content);
   const { updateContent, markSaved } = useEditorStore();
   const { setCursorPosition, setSelectedCode } = useUIStore();
+
+  // Sync external content changes (e.g. agent writes to an open file)
+  // We compare with lastExternalContent to avoid overwriting user's own edits
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    // Only update if the content changed externally (not from the user typing)
+    if (content !== lastExternalContent.current) {
+      lastExternalContent.current = content;
+      const currentEditorValue = editor.getValue();
+      if (currentEditorValue !== content) {
+        // Preserve cursor position during update
+        const position = editor.getPosition();
+        editor.setValue(content);
+        if (position) editor.setPosition(position);
+      }
+    }
+  }, [content]);
 
   // Register custom theme once Monaco loads
   useEffect(() => {
@@ -84,6 +103,7 @@ export default function MonacoEditor({ path, content, language }: Props) {
 
   const handleMount = (editor: Monaco.editor.IStandaloneCodeEditor) => {
     editorRef.current = editor;
+    lastExternalContent.current = content; // baseline for drift detection
 
     // Listen for custom actions from TitleBar.tsx (Edit/Selection menus)
     const handleEditorAction = (e: Event) => {

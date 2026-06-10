@@ -25,8 +25,12 @@ export const useEditorStore = create<EditorState>((set) => ({
   openFile: (file) =>
     set((s) => {
       const exists = s.openFiles.find((f) => f.path === file.path);
+      if (exists) {
+        // File already open — just switch to it (don't overwrite user edits)
+        return { activeFile: file.path };
+      }
       return {
-        openFiles: exists ? s.openFiles : [...s.openFiles, file],
+        openFiles: [...s.openFiles, file],
         activeFile: file.path,
       };
     }),
