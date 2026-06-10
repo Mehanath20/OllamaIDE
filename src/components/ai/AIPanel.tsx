@@ -296,7 +296,7 @@ export default function AIPanel() {
                 {messages.length === 0 ? (
                   <div className="chat-welcome">
                     <Bot size={36} className="welcome-bot" />
-                    <h3>Antigravity AI</h3>
+                    <h3>DeepCode Studio</h3>
                     <p>Ask anything, create files, run commands.<br/>Use <code>@filename</code> to load file context.</p>
                     <div className="welcome-hints">
                       <div className="hint-chip">✦ Write code</div>

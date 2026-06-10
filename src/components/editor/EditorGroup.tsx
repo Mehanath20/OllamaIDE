@@ -191,7 +191,7 @@ function WelcomeScreen() {
           </svg>
         </div>
 
-        <h1 className="welcome-title">Antigravity IDE</h1>
+        <h1 className="welcome-title">DeepCode Studio</h1>
         <p className="welcome-sub">AI-powered · Offline · Blazing fast</p>
 
         <div className="welcome-shortcuts">
