@@ -28,10 +28,9 @@ import ChatMessage from "./ChatMessage";
 import AgentStatus from "./AgentStatus";
 
 const RECOMMENDED_MODELS = [
-  { name: "qwen2.5-coder:14b", size: "9.0 GB", desc: "Recommended (Agent & Chat)" },
-  { name: "qwen2.5-coder:7b", size: "4.7 GB", desc: "Fast (Completions & Chat)" },
-  { name: "llama3.1:8b", size: "4.7 GB", desc: "General Chat Fallback" },
-  { name: "codestral", size: "13 GB", desc: "Alternative Code Model" },
+  { name: "qwen2.5-coder:7b", size: "4.7 GB", desc: "Beginner" },
+  { name: "qwen2.5-coder:14b", size: "9.0 GB", desc: "Good" },
+  { name: "qwen2.5-coder:32b", size: "20.0 GB", desc: "Pro" },
 ];
 
 export default function AIPanel() {
@@ -60,6 +59,31 @@ export default function AIPanel() {
   
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handlePullModelLevel = async (modelName: string) => {
+    setIsPulling(true);
+    setPullProgress("Requesting pull...");
+    try {
+      await pullModel(modelName, (p) => {
+        if (p.completed && p.total) {
+          const percent = ((p.completed / p.total) * 100).toFixed(0);
+          setPullProgress(`Downloading: ${percent}% (${(p.completed/1e9).toFixed(1)} GB / ${(p.total/1e9).toFixed(1)} GB)`);
+        } else {
+          setPullProgress(p.status || "Downloading...");
+        }
+      });
+      alert(`Model ${modelName} pulled successfully!`);
+      const models = await listModels();
+      setInstalledModels(models);
+      setActiveModel(modelName);
+    } catch (err: any) {
+      alert(`Failed to pull model: ${err.message || err}`);
+    } finally {
+      setIsPulling(false);
+      setPullProgress("");
+    }
+  };
 
   // Connection check on mount
   useEffect(() => {
@@ -153,6 +177,9 @@ export default function AIPanel() {
     if ((!inputVal.trim() && attachedImages.length === 0) || isStreaming) return;
     const prompt = inputVal || "Examine the attached image.";
     setInputVal("");
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
     
     // Pass images, then clear state
     const imagesToSend = [...attachedImages];
@@ -205,18 +232,31 @@ export default function AIPanel() {
           <span className="ai-header-title">✦ AI AGENT</span>
         </div>
         <div className="ai-header-right">
-          {ollamaOnline && installedModels.length > 0 && (
-            <select
-              className="model-select"
-              value={activeModel}
-              onChange={(e) => setActiveModel(e.target.value)}
-            >
-              {installedModels.map((m) => (
-                <option key={m} value={m}>
-                  {m.length > 18 ? m.substring(0, 18) + "…" : m}
-                </option>
-              ))}
-            </select>
+          {ollamaOnline && (
+            <div className="level-selector">
+              {(["Beginner", "Good", "Pro"] as const).map(level => {
+                const targetModel = level === "Beginner" ? "qwen2.5-coder:7b" : level === "Good" ? "qwen2.5-coder:14b" : "qwen2.5-coder:32b";
+                const isInstalled = installedModels.includes(targetModel);
+                const isActive = activeModel === targetModel;
+                return (
+                  <button 
+                    key={level}
+                    className={`level-btn ${isActive ? 'active' : ''}`}
+                    onClick={() => {
+                      if (isInstalled) {
+                        setActiveModel(targetModel);
+                      } else {
+                        handlePullModelLevel(targetModel);
+                      }
+                    }}
+                    title={isInstalled ? `Switch to ${level} model` : `Download ${level} model`}
+                  >
+                    {level}
+                    {!isInstalled && <Download size={10} style={{marginLeft: 4}}/>}
+                  </button>
+                )
+              })}
+            </div>
           )}
           {messages.length > 0 && (
             <button
@@ -254,8 +294,16 @@ export default function AIPanel() {
         </div>
       ) : (
         <>
+          {/* Global Pull Progress Banner */}
+          {isPulling && (
+            <div className="global-pull-banner">
+              <Download size={14} className="spin-slow" />
+              <span>{pullProgress}</span>
+            </div>
+          )}
+
           {/* Models Pulling interface if no models downloaded */}
-          {installedModels.length === 0 && (
+          {installedModels.length === 0 && !isPulling && (
             <div className="missing-models-alert">
               <Cpu size={24} className="missing-icon" />
               <h4>No LLM Models Detected</h4>
@@ -355,10 +403,15 @@ export default function AIPanel() {
                     onChange={handleImageUpload} 
                   />
                   <textarea
+                    ref={textareaRef}
                     className="chat-textarea"
                     rows={1}
                     value={inputVal}
-                    onChange={(e) => setInputVal(e.target.value)}
+                    onChange={(e) => {
+                      setInputVal(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                    }}
                     onKeyDown={handleKeyDown}
                     placeholder="Ask a question or describe an agent task... (use @filename)"
                   />
@@ -417,18 +470,37 @@ export default function AIPanel() {
           letter-spacing: 0.12em;
         }
 
-        .model-select {
-          max-width: 130px;
-          background: var(--bg-3);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-sm);
-          color: var(--text-secondary);
-          font-size: 11px;
-          padding: 2px 4px;
-          outline: none;
-          cursor: pointer;
+        .level-selector {
+          display: flex;
+          background: var(--bg-2);
+          border: 1px solid var(--border-soft);
+          border-radius: 4px;
+          overflow: hidden;
+          margin-right: 4px;
         }
-        .model-select:focus { border-color: var(--accent); }
+
+        .level-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          font-size: 10px;
+          font-weight: 600;
+          padding: 3px 8px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          transition: all var(--trans-fast);
+        }
+
+        .level-btn:hover {
+          background: rgba(255, 255, 255, 0.05);
+          color: var(--text-primary);
+        }
+
+        .level-btn.active {
+          background: var(--accent);
+          color: white;
+        }
 
         .btn-header-action {
           background: transparent;
@@ -589,6 +661,22 @@ export default function AIPanel() {
           color: var(--yellow);
           margin-top: var(--space-2);
           word-break: break-all;
+        }
+
+        .global-pull-banner {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(124, 58, 237, 0.1);
+          border-bottom: 1px solid rgba(124, 58, 237, 0.2);
+          padding: 8px 12px;
+          font-size: 11px;
+          color: var(--accent);
+          font-family: monospace;
+        }
+
+        .spin-slow {
+          animation: spin 2s linear infinite;
         }
 
         .chat-messages-scroll {

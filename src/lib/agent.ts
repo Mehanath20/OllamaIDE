@@ -15,14 +15,16 @@ import { getWorkspaceContext } from "./fileUtils";
 // Max messages kept in sliding context window
 const MAX_HISTORY_MESSAGES = 20;
 
-const AGENT_SYSTEM_PROMPT = `You are DeepCode, an autonomous AI coding agent inside DeepCode Studio.
+const AGENT_SYSTEM_PROMPT = `You are DeepCode, an autonomous AI Pro Developer coding agent inside DeepCode Studio.
 You have DIRECT access to the filesystem and terminal. You DO NOT explain — you ACT.
 
-CRITICAL RULE: When asked to create a file, write code, or do any filesystem task:
-  → IMMEDIATELY use the appropriate action tag. Do NOT describe what you will do.
-  → Do NOT say "Here's how to do it" or "You can do this by..."
-  → Do NOT ask the user to create files themselves.
-  → Just use the tag and do it NOW.
+## CORE MANDATE
+You are an expert, senior software engineer. When asked to build an application or feature:
+1. Write COMPLETE, PRODUCTION-READY code. Never use placeholders like "// ... rest of code".
+2. Implement stunning, modern aesthetics by default (vibrant gradients, dark modes, glassmorphism, smooth micro-animations). DO NOT build plain black-and-white UIs unless explicitly asked.
+3. Architect the code correctly. Use proper structuring, modularity, and error handling.
+4. If building a web application component, use high-quality, modern CSS.
+5. Provide complete files in a single pass whenever possible.
 
 ## ACTION TAGS (use exactly one per response turn):
 
@@ -50,41 +52,31 @@ brief reasoning
 
 ## EXAMPLES OF CORRECT BEHAVIOR:
 
-User: "create a python file that prints hello world"
+User: "create a modern login page"
 CORRECT response:
-<write_file path="hello.py">
-print("Hello, World!")
+<write_file path="login.html">
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    /* Full, beautiful, modern CSS with animations and glassmorphism here */
+  </style>
+</head>
+<body>
+  <!-- Complete login form with modern structure -->
+</body>
+</html>
 </write_file>
 
-User: "create a rust program to print my name is john"
-CORRECT response:
-<write_file path="main.rs">
-fn main() {
-    println!("My name is John");
-}
-</write_file>
-
-User: "create a file called solution.py with a class that sorts a list"
-CORRECT response:
-<write_file path="solution.py">
-class Solution:
-    def sort_list(self, nums):
-        return sorted(nums)
-</write_file>
-
-User: "run the command ls"
-CORRECT response:
-<run_command>ls</run_command>
-
-## RULES:
+## CRITICAL RULES:
 1. File creation/editing tasks → use <write_file> IMMEDIATELY, no preamble.
 2. Shell/terminal tasks → use <run_command> IMMEDIATELY, no preamble.
-3. ABSOLUTELY NO MARKDOWN CODE BLOCKS (\`\`\`) for file contents or terminal commands. You MUST use the XML tags (<write_file>...</write_file> or <run_command>...</run_command>).
+3. ABSOLUTELY NO MARKDOWN CODE BLOCKS (\`\`\`) for file contents or terminal commands. You MUST use the XML tags (<write_file>...</write_file> or <run_command>...</run_command>). Do NOT wrap the tags themselves in markdown.
 4. Use the filename the user specifies. If none given, pick a sensible name.
 5. If the user just wants to chat or ask a question → respond with text only (no tags).
 6. After an action completes, briefly confirm what you did (1-2 sentences max).
-7. File paths are relative to the workspace root. Use simple filenames (e.g. "hello.py" not "./src/hello.py") unless the user specifies otherwise.
-8. For multi-file tasks: handle one file per turn. The system will call you again for the next step.
+7. For multi-file tasks: handle one file per turn. The system will call you again for the next step.
+8. NEVER WRITE PARTIAL CODE. Always output the full contents of the file.
 `;
 
 /**
@@ -114,15 +106,9 @@ function getWorkspaceRoot(): string {
   const storeRoot = useFileStore.getState().workspaceRoot;
   if (storeRoot) return storeRoot;
 
-  // No workspace open — use the active file's directory as context
-  const activeFile = useEditorStore.getState().activeFile;
-  if (activeFile) {
-    const parts = activeFile.split(/[/\\]/);
-    parts.pop();
-    return parts.join("\\") || "C:\\Users\\Public\\Documents";
-  }
-
-  return "";
+  // No workspace open — use a dedicated safe temporary workspace
+  // to avoid modifying the IDE's own source code and triggering reloads.
+  return "/tmp/DeepCodeWorkspace";
 }
 
 /**
@@ -291,11 +277,12 @@ async function handleCompletedTurn(content: string): Promise<void> {
   }
 
   // ── Regex patterns for each action tag ──────────────────────────────────
-  const writeFileRx   = /<write_file\s+path="([^"]+)">([\s\S]*?)<\/write_file>/;
-  const readFileRx    = /<read_file\s+path="([^"]+)"\s*\/>/;
-  const runCommandRx  = /<run_command>([\s\S]*?)<\/run_command>/;
-  const listDirRx     = /<list_dir\s+path="([^"]+)"\s*\/>/;
-  const searchRx      = /<search_files\s+query="([^"]+)"\s+path="([^"]+)"\s*\/>/;
+  // Make regexes very forgiving to handle different quote styles or missing quotes
+  const writeFileRx   = /<write_file[^>]*>([\s\S]*?)<\/write_file>/i;
+  const readFileRx    = /<read_file[^>]*\/>/i;
+  const runCommandRx  = /<run_command>([\s\S]*?)<\/run_command>/i;
+  const listDirRx     = /<list_dir[^>]*\/>/i;
+  const searchRx      = /<search_files[^>]*\/>/i;
 
   const writeMatch   = content.match(writeFileRx);
   const readMatch    = content.match(readFileRx);
@@ -303,10 +290,23 @@ async function handleCompletedTurn(content: string): Promise<void> {
   const listDirMatch = content.match(listDirRx);
   const searchMatch  = content.match(searchRx);
 
+  // Helper to extract attributes from tags like <write_file path="foo">
+  const extractAttr = (tag: string, attr: string) => {
+    const rx = new RegExp(`(?:${attr})=['"]?([^'">\\s]+)['"]?`, 'i');
+    const m = tag.match(rx);
+    return m ? m[1] : null;
+  };
+
   // ── 1. WRITE FILE ────────────────────────────────────────────────────────
   if (writeMatch) {
-    const targetPath = writeMatch[1].trim();
-    const fileContent = writeMatch[2].replace(/^\n/, ""); // strip leading newline
+    // Extract path from the full tag string (writeMatch[0])
+    let targetPath = extractAttr(writeMatch[0], "path|file|name") || "untitled.txt";
+    
+    // Clean up the file content (strip leading/trailing markdown code blocks if the LLM added them)
+    let fileContent = writeMatch[1];
+    fileContent = fileContent.replace(/^\s*```[a-z]*\n/i, ""); // strip leading ```language
+    fileContent = fileContent.replace(/\n```\s*$/i, "");       // strip trailing ```
+    fileContent = fileContent.replace(/^\n/, "");              // strip leading newline
 
     aiStore.setAgentStatus("generating");
     aiStore.addAgentLog(`Writing file: ${targetPath}`);
@@ -396,7 +396,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
 
   // ── 2. READ FILE ─────────────────────────────────────────────────────────
   if (readMatch) {
-    const targetPath = readMatch[1].trim();
+    const targetPath = extractAttr(readMatch[0], "path|file|name") || "";
     aiStore.setAgentStatus("reading");
     aiStore.addAgentLog(`Reading: ${targetPath}`);
 
@@ -461,7 +461,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
 
   // ── 4. LIST DIRECTORY ────────────────────────────────────────────────────
   if (listDirMatch) {
-    const targetPath = listDirMatch[1].trim();
+    const targetPath = extractAttr(listDirMatch[0], "path|dir") || "";
     aiStore.setAgentStatus("reading");
     aiStore.addAgentLog(`Listing: ${targetPath}`);
 
@@ -488,10 +488,10 @@ async function handleCompletedTurn(content: string): Promise<void> {
 
   // ── 5. SEARCH FILES ──────────────────────────────────────────────────────
   if (searchMatch) {
-    const query = searchMatch[1];
-    const targetPath = searchMatch[2];
+    const query = extractAttr(searchMatch[0], "query") || "";
+    const targetPath = extractAttr(searchMatch[0], "path|dir") || ".";
     aiStore.setAgentStatus("reading");
-    aiStore.addAgentLog(`Searching "${query}"...`);
+    aiStore.addAgentLog(`Searching: ${query}`);
 
     let output = "";
     try {

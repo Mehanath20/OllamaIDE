@@ -43,12 +43,7 @@ pub fn run() {
             commands::ollama::chat_ollama,
             commands::ollama::generate_completion,
         ])
-        .setup(|app| {
-            #[cfg(debug_assertions)]
-            {
-                let window = app.get_webview_window("main").unwrap();
-                window.open_devtools();
-            }
+        .setup(|_app| {
             Ok(())
         })
         .run(tauri::generate_context!())

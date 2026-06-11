@@ -61,27 +61,27 @@ export default function XtermTerminal({ sessionId, isActive }: Props) {
       windowsMode: false,
       convertEol: true,
       theme: {
-        background:          "#000000",
-        foreground:          "#ffffff",
-        cursor:              "#e4e4e7",
-        cursorAccent:        "#000000",
-        selectionBackground: "#333333",
-        black:               "#000000",
-        red:                 "#ef4444",
-        green:               "#10b981",
-        yellow:              "#f59e0b",
-        blue:                "#3b82f6",
-        magenta:             "#7c3aed",
-        cyan:                "#06b6d4",
-        white:               "#e8eaf0",
-        brightBlack:         "#5a6270",
-        brightRed:           "#f87171",
-        brightGreen:         "#34d399",
-        brightYellow:        "#fbbf24",
-        brightBlue:          "#60a5fa",
-        brightMagenta:       "#a78bfa",
-        brightCyan:          "#22d3ee",
-        brightWhite:         "#f9fafb",
+        background:          "#0B0E14",
+        foreground:          "#A6ACCD",
+        cursor:              "#FFCB6B",
+        cursorAccent:        "#0B0E14",
+        selectionBackground: "#333747",
+        black:               "#292D3E",
+        red:                 "#F07178",
+        green:               "#C3E88D",
+        yellow:              "#FFCB6B",
+        blue:                "#82AAFF",
+        magenta:             "#C792EA",
+        cyan:                "#89DDFF",
+        white:               "#FFFFFF",
+        brightBlack:         "#676E95",
+        brightRed:           "#F07178",
+        brightGreen:         "#C3E88D",
+        brightYellow:        "#FFCB6B",
+        brightBlue:          "#82AAFF",
+        brightMagenta:       "#C792EA",
+        brightCyan:          "#89DDFF",
+        brightWhite:         "#FFFFFF",
       },
     });
 
@@ -95,6 +95,12 @@ export default function XtermTerminal({ sessionId, isActive }: Props) {
     term.loadAddon(searchAddon);
 
     term.open(containerRef.current);
+
+    // Restore history to prevent blank screen on tab switch
+    const sess = useTerminalStore.getState().sessions.find((s) => s.id === sessionId);
+    if (sess?.recentOutput) {
+      term.write(sess.recentOutput);
+    }
 
     // Fit after a brief delay to let the DOM settle
     requestAnimationFrame(() => {

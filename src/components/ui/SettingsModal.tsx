@@ -81,36 +81,36 @@ export default function SettingsModal() {
         .settings-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(0,0,0,0.6);
+          background: rgba(0, 0, 0, 0.4);
           z-index: 10000;
           display: flex;
           align-items: center;
           justify-content: center;
-          backdrop-filter: blur(4px);
-          animation: settingsFade 150ms ease;
+          backdrop-filter: blur(8px);
+          animation: settingsFade 200ms ease-out;
         }
 
         @keyframes settingsFade {
-          from { opacity: 0; }
-          to { opacity: 1; }
+          from { opacity: 0; backdrop-filter: blur(0px); }
+          to { opacity: 1; backdrop-filter: blur(8px); }
         }
 
         .settings-modal {
-          width: 500px;
+          width: 540px;
           max-width: 90vw;
           max-height: 85vh;
-          background: var(--bg-1);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-md);
-          box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+          background: rgba(15, 18, 25, 0.85);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 16px;
+          box-shadow: 0 32px 96px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255,255,255,0.05);
           display: flex;
           flex-direction: column;
           overflow: hidden;
-          animation: settingsSlide 200ms ease;
+          animation: settingsSlide 300ms cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         @keyframes settingsSlide {
-          from { transform: scale(0.96) translateY(10px); opacity: 0; }
+          from { transform: scale(0.94) translateY(20px); opacity: 0; }
           to { transform: scale(1) translateY(0); opacity: 1; }
         }
 
@@ -118,59 +118,76 @@ export default function SettingsModal() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: var(--space-4) var(--space-5);
-          border-bottom: 1px solid var(--border-soft);
-          background: var(--bg-2);
+          padding: 20px 24px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+          background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
         }
 
         .settings-title {
-          font-weight: 600;
+          font-weight: 700;
+          font-size: 16px;
           display: flex;
           align-items: center;
-          gap: 8px;
-          color: var(--text-primary);
+          gap: 10px;
+          color: #ffffff;
+          letter-spacing: 0.02em;
+        }
+
+        .settings-title svg {
+          color: #a78bfa;
         }
 
         .settings-close {
           background: transparent;
           border: none;
-          color: var(--text-muted);
+          color: rgba(255, 255, 255, 0.5);
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: var(--radius-sm);
-          padding: 4px;
+          border-radius: 8px;
+          padding: 6px;
+          transition: all 0.2s;
         }
 
         .settings-close:hover {
-          background: var(--bg-3);
-          color: var(--text-primary);
+          background: rgba(255, 255, 255, 0.1);
+          color: #ffffff;
+          transform: rotate(90deg);
         }
 
         .settings-body {
           flex: 1;
           overflow-y: auto;
-          padding: var(--space-5);
+          padding: 24px;
           display: flex;
           flex-direction: column;
-          gap: var(--space-6);
+          gap: 32px;
+        }
+        
+        .settings-body::-webkit-scrollbar {
+          width: 6px;
+        }
+        .settings-body::-webkit-scrollbar-thumb {
+          background: rgba(255,255,255,0.1);
+          border-radius: 10px;
         }
 
         .settings-section {
           display: flex;
           flex-direction: column;
-          gap: var(--space-4);
+          gap: 16px;
         }
 
         .settings-section-title {
-          font-size: var(--text-sm);
-          color: var(--text-muted);
+          font-size: 12px;
+          color: #a78bfa;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
+          letter-spacing: 0.08em;
+          font-weight: 700;
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 8px;
           margin-bottom: 4px;
         }
 
@@ -178,34 +195,71 @@ export default function SettingsModal() {
           display: flex;
           align-items: center;
           justify-content: space-between;
+          background: rgba(255, 255, 255, 0.02);
+          border: 1px solid rgba(255, 255, 255, 0.04);
+          padding: 12px 16px;
+          border-radius: 10px;
+          transition: background 0.2s, border-color 0.2s;
+        }
+
+        .settings-group:hover {
+          background: rgba(255, 255, 255, 0.04);
+          border-color: rgba(167, 139, 250, 0.3);
         }
 
         .settings-label {
-          color: var(--text-primary);
-          font-size: var(--text-sm);
+          color: #e2e8f0;
+          font-size: 14px;
+          font-weight: 500;
         }
 
         .settings-select, .settings-input {
-          background: var(--bg-2);
-          border: 1px solid var(--border);
-          color: var(--text-primary);
-          padding: 6px 12px;
-          border-radius: var(--radius-sm);
-          font-size: var(--text-sm);
+          background: rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: #ffffff;
+          padding: 8px 14px;
+          border-radius: 8px;
+          font-size: 13px;
           outline: none;
-          width: 200px;
+          width: 220px;
+          transition: all 0.2s;
+          box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .settings-select:hover, .settings-input:hover {
+          border-color: rgba(255, 255, 255, 0.2);
         }
 
         .settings-select:focus, .settings-input:focus {
-          border-color: var(--accent);
+          border-color: #a78bfa;
+          box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.2), inset 0 2px 4px rgba(0,0,0,0.2);
         }
 
         .settings-checkbox-group {
           display: flex;
           align-items: center;
-          gap: 8px;
-          font-size: var(--text-sm);
-          color: var(--text-primary);
+          gap: 12px;
+          background: rgba(255, 255, 255, 0.02);
+          border: 1px solid rgba(255, 255, 255, 0.04);
+          padding: 12px 16px;
+          border-radius: 10px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #e2e8f0;
+          transition: all 0.2s;
+          cursor: pointer;
+        }
+
+        .settings-checkbox-group:hover {
+          background: rgba(255, 255, 255, 0.04);
+          border-color: rgba(167, 139, 250, 0.3);
+        }
+
+        .settings-checkbox-group input[type="checkbox"] {
+          width: 16px;
+          height: 16px;
+          accent-color: #a78bfa;
+          cursor: pointer;
         }
       `}</style>
     </div>
