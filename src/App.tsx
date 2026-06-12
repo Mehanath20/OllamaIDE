@@ -13,6 +13,7 @@ import StatusBar from "./components/layout/StatusBar";
 import AICommandPalette from "./components/ui/AICommandPalette";
 import CommandPalette from "./components/ui/CommandPalette";
 import SettingsModal from "./components/ui/SettingsModal";
+import AboutModal from "./components/ui/AboutModal";
 import { useUIStore } from "./store/uiStore";
 import { useInlineCompletions } from "./components/ai/InlineSuggest";
 import DiffReview from "./components/ai/DiffReview";
@@ -79,6 +80,11 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
+
+  const { theme } = useUIStore();
+  useEffect(() => {
+    document.body.className = `theme-${theme}`;
+  }, [theme]);
 
   const sidebarOpen = sidebarView !== null;
 
@@ -155,6 +161,7 @@ export default function App() {
       {aiCommandPaletteOpen && <AICommandPalette />}
       <DiffReview />
       <SettingsModal />
+      <AboutModal />
 
       <style>{`
         .app-shell {

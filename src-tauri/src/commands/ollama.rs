@@ -148,7 +148,14 @@ pub async fn pull_model(
         .await
         .map_err(|e| e.to_string())?;
 
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Pull failed: {}", err_text));
+    }
+
     let mut buffer = Vec::new();
+    let mut last_error = None;
+
     while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
         buffer.extend_from_slice(&chunk);
         while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
@@ -165,6 +172,10 @@ pub async fn pull_model(
                     
                     let done = status == "success" || error.is_some();
 
+                    if let Some(ref err_msg) = error {
+                        last_error = Some(err_msg.clone());
+                    }
+
                     let _ = app.emit(
                         "ollama-pull-progress",
                         PullProgressPayload {
@@ -179,6 +190,10 @@ pub async fn pull_model(
                 }
             }
         }
+    }
+
+    if let Some(err) = last_error {
+        return Err(format!("Ollama error: {}", err));
     }
 
     Ok(())

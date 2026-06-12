@@ -61,29 +61,7 @@ export default function AIPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handlePullModelLevel = async (modelName: string) => {
-    setIsPulling(true);
-    setPullProgress("Requesting pull...");
-    try {
-      await pullModel(modelName, (p) => {
-        if (p.completed && p.total) {
-          const percent = ((p.completed / p.total) * 100).toFixed(0);
-          setPullProgress(`Downloading: ${percent}% (${(p.completed/1e9).toFixed(1)} GB / ${(p.total/1e9).toFixed(1)} GB)`);
-        } else {
-          setPullProgress(p.status || "Downloading...");
-        }
-      });
-      alert(`Model ${modelName} pulled successfully!`);
-      const models = await listModels();
-      setInstalledModels(models);
-      setActiveModel(modelName);
-    } catch (err: any) {
-      alert(`Failed to pull model: ${err.message || err}`);
-    } finally {
-      setIsPulling(false);
-      setPullProgress("");
-    }
-  };
+
 
   // Connection check on mount
   useEffect(() => {
@@ -163,8 +141,14 @@ export default function AIPanel() {
       alert(`Model ${pullInput} pulled successfully!`);
       // Refresh models
       const models = await listModels();
+      let pulledModel = models.find(m => m === pullInput.trim() || m.startsWith(pullInput.trim() + ":"));
+      if (!pulledModel) {
+        // Fallback: manually inject it if it hasn't registered in listModels yet
+        pulledModel = pullInput.trim() + ":latest";
+        models.push(pulledModel);
+      }
       setInstalledModels(models);
-      setActiveModel(pullInput);
+      setActiveModel(pulledModel);
     } catch (err: any) {
       alert(`Failed to pull model: ${err.message || err}`);
     } finally {
@@ -233,29 +217,67 @@ export default function AIPanel() {
         </div>
         <div className="ai-header-right">
           {ollamaOnline && (
-            <div className="level-selector">
-              {(["Beginner", "Good", "Pro"] as const).map(level => {
-                const targetModel = level === "Beginner" ? "qwen2.5-coder:7b" : level === "Good" ? "qwen2.5-coder:14b" : "qwen2.5-coder:32b";
-                const isInstalled = installedModels.includes(targetModel);
-                const isActive = activeModel === targetModel;
-                return (
-                  <button 
-                    key={level}
-                    className={`level-btn ${isActive ? 'active' : ''}`}
-                    onClick={() => {
-                      if (isInstalled) {
-                        setActiveModel(targetModel);
-                      } else {
-                        handlePullModelLevel(targetModel);
+            <div className="model-dropdown-container">
+              <select
+                className="model-select"
+                value={activeModel || ""}
+                onChange={(e) => setActiveModel(e.target.value)}
+                title="Select Active Model"
+              >
+                {installedModels.length === 0 ? (
+                  <option disabled value="">No models installed</option>
+                ) : (
+                  <>
+                    {!installedModels.includes(activeModel) && activeModel && (
+                      <option value={activeModel}>{activeModel}</option>
+                    )}
+                    {installedModels.map(model => (
+                      <option key={model} value={model}>{model}</option>
+                    ))}
+                  </>
+                )}
+              </select>
+              <button 
+                className="btn-pull-new" 
+                title="Download another model"
+                onClick={() => {
+                  const model = prompt("Enter model name to pull (e.g., 'llama3' or 'mistral'):");
+                  if (model && model.trim()) {
+                    setPullInput(model.trim());
+                    // use handlePullModel logic, wait we don't have access to event here easily, so just call an inline async wrapper
+                    (async () => {
+                      setIsPulling(true);
+                      setPullProgress("Requesting pull...");
+                      try {
+                        await pullModel(model.trim(), (p) => {
+                          if (p.completed && p.total) {
+                            const percent = ((p.completed / p.total) * 100).toFixed(0);
+                            setPullProgress(`Downloading: ${percent}%`);
+                          } else {
+                            setPullProgress(p.status || "Downloading...");
+                          }
+                        });
+                        alert(`Model ${model.trim()} pulled successfully!`);
+                        const models = await listModels();
+                        let pulledModel = models.find(m => m === model.trim() || m.startsWith(model.trim() + ":"));
+                        if (!pulledModel) {
+                          pulledModel = model.trim() + ":latest";
+                          models.push(pulledModel);
+                        }
+                        setInstalledModels(models);
+                        setActiveModel(pulledModel);
+                      } catch (err: any) {
+                        alert(`Failed to pull model: ${err.message || err}`);
+                      } finally {
+                        setIsPulling(false);
+                        setPullProgress("");
                       }
-                    }}
-                    title={isInstalled ? `Switch to ${level} model` : `Download ${level} model`}
-                  >
-                    {level}
-                    {!isInstalled && <Download size={10} style={{marginLeft: 4}}/>}
-                  </button>
-                )
-              })}
+                    })();
+                  }
+                }}
+              >
+                <Plus size={10} />
+              </button>
             </div>
           )}
           {messages.length > 0 && (
@@ -310,17 +332,21 @@ export default function AIPanel() {
               <p>Download a coding model to get started. Qwen2.5-Coder is highly recommended.</p>
 
               <div className="pull-model-group">
-                <select
-                  className="pull-select"
+                <input
+                  type="text"
+                  className="pull-input"
+                  placeholder="e.g. llama3, mistral, qwen..."
                   value={pullInput}
                   onChange={(e) => setPullInput(e.target.value)}
-                >
+                  list="recommended-models"
+                />
+                <datalist id="recommended-models">
                   {RECOMMENDED_MODELS.map((m) => (
                     <option key={m.name} value={m.name}>
-                      {m.name} ({m.size})
+                      {m.desc} ({m.size})
                     </option>
                   ))}
-                </select>
+                </datalist>
                 <button
                   className="btn-action btn-action--primary"
                   onClick={handlePullModel}
@@ -470,34 +496,47 @@ export default function AIPanel() {
           letter-spacing: 0.12em;
         }
 
-        .level-selector {
+        .model-dropdown-container {
           display: flex;
-          background: var(--bg-2);
-          border: 1px solid var(--border-soft);
-          border-radius: 4px;
+          background: #000000; /* initial color black */
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          border-radius: 6px;
           overflow: hidden;
           margin-right: 4px;
         }
 
-        .level-btn {
-          background: transparent;
+        .model-select {
+          background: transparent !important;
           border: none;
-          color: var(--text-muted);
-          font-size: 10px;
+          color: white !important;
+          font-size: 11px;
           font-weight: 600;
-          padding: 3px 8px;
+          padding: 4px 8px;
           cursor: pointer;
-          display: flex;
-          align-items: center;
-          transition: all var(--trans-fast);
+          outline: none;
+          max-width: 140px;
+          text-overflow: ellipsis;
         }
 
-        .level-btn:hover {
-          background: rgba(255, 255, 255, 0.05);
+        .model-select option {
+          background: var(--bg-2);
           color: var(--text-primary);
         }
 
-        .level-btn.active {
+        .btn-pull-new {
+          background: transparent;
+          border: none;
+          color: rgba(255, 255, 255, 0.8);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 8px;
+          border-left: 1px solid rgba(255, 255, 255, 0.2);
+          transition: background var(--trans-fast), color var(--trans-fast);
+        }
+
+        .btn-pull-new:hover {
           background: var(--accent);
           color: white;
         }

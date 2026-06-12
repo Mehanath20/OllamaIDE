@@ -37,7 +37,7 @@ const fileMenuStructure: MenuItemDef[] = [
   { type: "submenu", label: "Share", action: "unsupported" },
   { type: "separator" },
   { type: "item", label: "Auto Save", action: "unsupported" },
-  { type: "submenu", label: "Preferences", action: "unsupported" },
+  { type: "item", label: "Preferences", action: "view:settings" },
   { type: "separator" },
   { type: "item", label: "Revert File", action: "revert" },
   { type: "item", label: "Close Editor", shortcut: "Ctrl+F4", action: "close-editor" },
@@ -101,10 +101,10 @@ const viewMenuStructure: MenuItemDef[] = [
   { type: "item", label: "Run", shortcut: "Ctrl+Shift+D", action: "unsupported" },
   { type: "item", label: "Extensions", shortcut: "Ctrl+Shift+X", action: "view:extensions" },
   { type: "separator" },
-  { type: "item", label: "Problems", shortcut: "Ctrl+Shift+M", action: "unsupported" },
-  { type: "item", label: "Output", shortcut: "Ctrl+Shift+U", action: "unsupported" },
-  { type: "item", label: "Debug Console", shortcut: "Ctrl+Shift+Y", action: "unsupported" },
-  { type: "item", label: "Terminal", shortcut: "Ctrl+`", action: "view:terminal" },
+  { type: "item", label: "Problems", shortcut: "Ctrl+Shift+M", action: "view:bottom:problems" },
+  { type: "item", label: "Output", shortcut: "Ctrl+Shift+U", action: "view:bottom:output" },
+  { type: "item", label: "Debug Console", shortcut: "Ctrl+Shift+Y", action: "view:bottom:debug" },
+  { type: "item", label: "Terminal", shortcut: "Ctrl+`", action: "view:bottom:terminal" },
   { type: "separator" },
   { type: "item", label: "Word Wrap", shortcut: "Alt+Z", action: "editor:editor.action.toggleWordWrap" },
 ];
@@ -180,7 +180,7 @@ const terminalMenuStructure: MenuItemDef[] = [
 ];
 
 const helpMenuStructure: MenuItemDef[] = [
-  { type: "item", label: "Welcome", action: "unsupported" },
+  { type: "item", label: "Welcome", action: "help:welcome" },
   { type: "item", label: "Show All Commands", shortcut: "Ctrl+Shift+P", action: "view:command-palette" },
   { type: "item", label: "Editor Playground", action: "unsupported" },
   { type: "item", label: "Open Walkthrough...", action: "unsupported" },
@@ -188,12 +188,12 @@ const helpMenuStructure: MenuItemDef[] = [
   { type: "separator" },
   { type: "item", label: "View License", action: "unsupported" },
   { type: "separator" },
-  { type: "item", label: "Toggle Developer Tools", action: "unsupported" },
+  { type: "item", label: "Restart Window", action: "help:restart" },
   { type: "item", label: "Open Process Explorer", action: "unsupported" },
   { type: "separator" },
   { type: "item", label: "Check for Updates...", action: "unsupported" },
   { type: "separator" },
-  { type: "item", label: "About", action: "unsupported" },
+  { type: "item", label: "About", action: "help:about" },
 ];
 
 export default function TitleBar() {
@@ -203,7 +203,7 @@ export default function TitleBar() {
 
   const { workspaceRoot, setWorkspaceRoot, setCreatingItem, setTree } = useFileStore();
   const { openFiles, activeFile, openFile, closeFile, updateContent, markSaved } = useEditorStore();
-  const { setSidebarView, bottomPanelOpen, setBottomPanelOpen, commandPaletteOpen, setCommandPaletteOpen, quickOpenOpen, setQuickOpenOpen } = useUIStore();
+  const { setSidebarView, setBottomPanelOpen, setBottomPanelTab, commandPaletteOpen, setCommandPaletteOpen, quickOpenOpen, setQuickOpenOpen, setSettingsOpen, setAboutOpen } = useUIStore();
 
   const handleMenuAction = async (action: string) => {
     setActiveMenu(null);
@@ -219,12 +219,33 @@ export default function TitleBar() {
         const viewAction = action.replace("view:", "");
         if (viewAction === "command-palette") {
           setCommandPaletteOpen(!commandPaletteOpen);
-        } else if (viewAction === "terminal") {
-          setBottomPanelOpen(!bottomPanelOpen);
+        } else if (viewAction.startsWith("bottom:")) {
+          setBottomPanelOpen(true);
+          setBottomPanelTab(viewAction.split(":")[1] as any);
         } else if (viewAction === "quick-open") {
           setQuickOpenOpen(!quickOpenOpen);
+        } else if (viewAction === "settings") {
+          setSettingsOpen(true);
         } else {
           setSidebarView(viewAction as any);
+        }
+        return;
+      }
+
+      if (action.startsWith("help:")) {
+        const helpAction = action.replace("help:", "");
+        if (helpAction === "about") {
+          setAboutOpen(true);
+        } else if (helpAction === "welcome") {
+          openFile({
+            path: "Welcome.md",
+            name: "Welcome",
+            content: "# Welcome to Ollama IDE\n\nYour powerful offline AI assistant.",
+            language: "markdown",
+            isDirty: false,
+          });
+        } else if (helpAction === "restart") {
+          window.location.reload();
         }
         return;
       }

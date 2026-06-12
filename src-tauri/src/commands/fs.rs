@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use notify::{Watcher, RecursiveMode, recommended_watcher, Event};
@@ -164,4 +164,57 @@ pub fn search_files(path: String, query: String) -> Result<Vec<SearchResult>, St
 
     search_dir(Path::new(&path), &q, &mut results, Path::new(&path));
     Ok(results)
+}
+
+#[tauri::command]
+pub async fn search_extensions(query: String) -> Result<String, String> {
+    let url = "https://open-vsx.org/api/-/search";
+    
+    // Create a client that ignores SSL cert errors to bypass local environment issues
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+        
+    let resp = client.get(url)
+        .query(&[("query", &query), ("size", &"15".to_string())])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+        
+    let text = resp.text()
+        .await
+        .map_err(|e| e.to_string())?;
+        
+    Ok(text)
+}
+
+#[tauri::command]
+pub async fn download_extension(url: String, id: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client.get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let bytes = resp.bytes()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Save to ~/.antigravity/extensions/
+    let mut path = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("~"));
+    path.push(".antigravity");
+    path.push("extensions");
+    
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    
+    path.push(format!("{}.vsix", id));
+    
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+
+    Ok(path.to_string_lossy().to_string())
 }

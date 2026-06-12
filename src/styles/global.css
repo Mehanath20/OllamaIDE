@@ -138,6 +138,7 @@ body,
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color-scheme: dark; /* Force native UI controls to render in dark mode */
 }
 
 /* Disable text selection only on drag regions */

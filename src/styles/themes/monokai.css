@@ -1,0 +1,32 @@
+body.theme-monokai {
+  --background: #272822;
+  --sidebar:    #1e1f1c;
+  --editor:     #272822;
+  --ai-panel:   #1e1f1c;
+  --terminal:   #1e1f1c;
+
+  --border:      #3e3d32;
+  --border-soft: #49483e;
+
+  --text-main:      #f8f8f2;
+  --text-muted:     #75715e;
+  --text-secondary: #f8f8f2;
+
+  --hover:  #3e3d32;
+  --active: #49483e;
+
+  --bg-0: #272822;
+  --bg-1: #1e1f1c;
+  --bg-2: #272822;
+  --bg-3: #3e3d32;
+  --bg-4: #49483e;
+  --bg-5: #75715e;
+
+  --accent:       #fd971f;
+  --accent-hover: #e6db74;
+
+  --text-primary:   var(--text-main);
+  --text-inverse:   #000000;
+
+  color-scheme: dark;
+}

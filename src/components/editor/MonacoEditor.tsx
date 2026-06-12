@@ -25,7 +25,7 @@ export default function MonacoEditor({ path, content, language }: Props) {
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const lastExternalContent = useRef<string>(content);
   const { updateContent, markSaved } = useEditorStore();
-  const { setCursorPosition, setSelectedCode } = useUIStore();
+  const { setCursorPosition, setSelectedCode, theme, fontSize, tabSize } = useUIStore();
 
   // Sync external content changes (e.g. agent writes to an open file)
   // We compare with lastExternalContent to avoid overwriting user's own edits
@@ -45,9 +45,11 @@ export default function MonacoEditor({ path, content, language }: Props) {
     }
   }, [content]);
 
-  // Register custom theme once Monaco loads
+  // Register custom themes once Monaco loads
   useEffect(() => {
     if (!monaco) return;
+    
+    // Dark Theme
     monaco.editor.defineTheme("antigravity-dark", {
       base: "vs-dark",
       inherit: true,
@@ -98,7 +100,60 @@ export default function MonacoEditor({ path, content, language }: Props) {
         "minimapSlider.hoverBackground":        "#3a3a3a90",
       },
     });
-    monaco.editor.setTheme("antigravity-dark");
+
+    // Light Theme
+    monaco.editor.defineTheme("antigravity-light", {
+      base: "vs",
+      inherit: true,
+      rules: [
+        { token: "comment",           foreground: "a0a1a7", fontStyle: "italic" },
+        { token: "keyword",           foreground: "a626a4", fontStyle: "bold" },
+        { token: "string",            foreground: "50a14f" },
+        { token: "number",            foreground: "986801" },
+        { token: "type",              foreground: "c18401" },
+        { token: "function",          foreground: "4078f2" },
+        { token: "variable",          foreground: "383a42" },
+      ],
+      colors: {
+        "editor.background":                    "#ffffff",
+        "editor.foreground":                    "#383a42",
+        "editorLineNumber.foreground":          "#9d9d9f",
+        "editorLineNumber.activeForeground":    "#383a42",
+        "editor.lineHighlightBackground":       "#f2f2f2",
+        "editor.lineHighlightBorder":           "#f2f2f2",
+        "editor.selectionBackground":           "#e5e5e6",
+        "editor.inactiveSelectionBackground":   "#e5e5e6",
+        "editorCursor.foreground":              "#526fff",
+        "editorGutter.background":              "#ffffff",
+      },
+    });
+
+    // Monokai Theme
+    monaco.editor.defineTheme("antigravity-monokai", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [
+        { token: "comment",           foreground: "75715e", fontStyle: "italic" },
+        { token: "keyword",           foreground: "f92672", fontStyle: "bold" },
+        { token: "string",            foreground: "e6db74" },
+        { token: "number",            foreground: "ae81ff" },
+        { token: "type",              foreground: "66d9ef" },
+        { token: "function",          foreground: "a6e22e" },
+        { token: "variable",          foreground: "f8f8f2" },
+      ],
+      colors: {
+        "editor.background":                    "#272822",
+        "editor.foreground":                    "#f8f8f2",
+        "editorLineNumber.foreground":          "#75715e",
+        "editorLineNumber.activeForeground":    "#f8f8f2",
+        "editor.lineHighlightBackground":       "#3e3d32",
+        "editor.lineHighlightBorder":           "#3e3d32",
+        "editor.selectionBackground":           "#49483e",
+        "editor.inactiveSelectionBackground":   "#49483e",
+        "editorCursor.foreground":              "#f8f8f0",
+        "editorGutter.background":              "#272822",
+      },
+    });
   }, [monaco]);
 
   const handleMount = (editor: Monaco.editor.IStandaloneCodeEditor) => {
@@ -121,6 +176,11 @@ export default function MonacoEditor({ path, content, language }: Props) {
     // Ctrl+S → save
     // IMPORTANT: Always read path from the store at save time, not from the closed-over prop.
     editor.addCommand(monaco?.KeyMod.CtrlCmd! | monaco?.KeyCode.KeyS!, async () => {
+      // Format on save if enabled
+      if (useUIStore.getState().formatOnSave) {
+        await editor.getAction('editor.action.formatDocument')?.run();
+      }
+
       const current = editor.getValue();
       // Resolve the canonical path from the store (handles renames, untitled files, etc.)
       const storePath = useEditorStore.getState().activeFile ?? path;
@@ -184,15 +244,15 @@ export default function MonacoEditor({ path, content, language }: Props) {
         width="100%"
         language={language}
         defaultValue={content}  // Use defaultValue to prevent prop-driven content re-render loop
-        theme="antigravity-dark"
+        theme={`antigravity-${theme}`}
         onMount={handleMount}
         onChange={handleChange}
         options={{
-          fontSize: 13,
+          fontSize: fontSize,
           fontFamily: '"JetBrains Mono", "Cascadia Code", "Fira Code", Consolas, monospace',
           fontLigatures: true,
-          lineHeight: 21,
-          tabSize: 2,
+          lineHeight: Math.floor(fontSize * 1.6), // dynamic line height based on font size
+          tabSize: tabSize,
           minimap: { enabled: true, scale: 1, side: "right", renderCharacters: false },
           scrollBeyondLastLine: false,
           smoothScrolling: true,

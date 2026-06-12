@@ -37,12 +37,11 @@ const PANEL_TABS: { id: PanelTab; label: string; Icon: LucideIcon }[] = [
 ];
 
 export default function BottomPanel() {
-  const [panelTab, setPanelTab] = useState<PanelTab>("terminal");
   const [profileOpen, setProfileOpen] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const profileRef = useRef<HTMLDivElement>(null);
-  const { setBottomPanelOpen } = useUIStore();
+  const { setBottomPanelOpen, bottomPanelTab, setBottomPanelTab } = useUIStore();
 
   const {
     sessions,
@@ -129,8 +128,8 @@ export default function BottomPanel() {
           {PANEL_TABS.map(({ id, label, Icon }) => (
             <button
               key={id}
-              className={`panel-type-tab ${panelTab === id ? "panel-type-tab--active" : ""}`}
-              onClick={() => setPanelTab(id)}
+              className={`panel-type-tab ${bottomPanelTab === id ? "panel-type-tab--active" : ""}`}
+              onClick={() => setBottomPanelTab(id as any)}
             >
               <Icon size={13} />
               {label}
@@ -139,7 +138,7 @@ export default function BottomPanel() {
         </div>
 
         {/* Terminal session tabs (only visible on terminal tab) */}
-        {panelTab === "terminal" && (
+        {bottomPanelTab === "terminal" && (
           <div className="session-tabs-row">
             {sessions.map((s) => (
               <div
@@ -237,7 +236,7 @@ export default function BottomPanel() {
       {/* ── Content area ────────────────────────────────────── */}
       <div className="bottom-content">
         {/* Terminal instances */}
-        {panelTab === "terminal" && (
+        {bottomPanelTab === "terminal" && (
           <div className="terminal-pane">
             {sessions.length === 0 ? (
               <div className="panel-empty-msg">
@@ -260,7 +259,7 @@ export default function BottomPanel() {
         )}
 
         {/* Output tab */}
-        {panelTab === "output" && (
+        {bottomPanelTab === "output" && (
           <div className="panel-placeholder-content">
             <div className="panel-output-header">
               <span>Build Output</span>
@@ -274,7 +273,7 @@ export default function BottomPanel() {
         )}
 
         {/* Problems tab */}
-        {panelTab === "problems" && (
+        {bottomPanelTab === "problems" && (
           <div className="panel-placeholder-content">
             <div className="panel-output-header">
               <span>Problems</span>
@@ -289,7 +288,7 @@ export default function BottomPanel() {
         )}
 
         {/* Debug Console tab */}
-        {panelTab === "debug" && (
+        {bottomPanelTab === "debug" && (
           <div className="panel-placeholder-content">
             <div className="panel-output-header">
               <span>Debug Console</span>

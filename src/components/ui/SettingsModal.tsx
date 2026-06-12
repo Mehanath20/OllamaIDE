@@ -1,8 +1,22 @@
 import { X, Monitor, Cpu, Paintbrush, FileCode } from "lucide-react";
 import { useUIStore } from "../../store/uiStore";
+import { useAIStore } from "../../store/aiStore";
 
 export default function SettingsModal() {
-  const { settingsOpen, setSettingsOpen } = useUIStore();
+  const { 
+    settingsOpen, 
+    setSettingsOpen, 
+    theme, 
+    setTheme,
+    fontSize,
+    setFontSize,
+    tabSize,
+    setTabSize,
+    formatOnSave,
+    setFormatOnSave
+  } = useUIStore() as any;
+
+  const { activeModel, setActiveModel, installedModels } = useAIStore() as any;
 
   if (!settingsOpen) return null;
 
@@ -26,17 +40,21 @@ export default function SettingsModal() {
             </h3>
             <div className="settings-group">
               <label className="settings-label">Default Model</label>
-              <select className="settings-select" defaultValue="qwen2.5:7b">
-                <option value="qwen2.5:7b">Qwen 2.5 (7B)</option>
-                <option value="llama3:8b">Llama 3 (8B)</option>
-                <option value="phi3:mini">Phi 3 Mini</option>
+              <select 
+                className="settings-select" 
+                value={activeModel || ""} 
+                onChange={(e) => setActiveModel(e.target.value)}
+              >
+                {installedModels.map((m: string) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
               </select>
             </div>
             <div className="settings-group">
               <label className="settings-label">Inference Mode</label>
               <select className="settings-select" defaultValue="local">
                 <option value="local">Local (Ollama)</option>
-                <option value="cloud">Cloud (OpenAI API)</option>
+                <option value="cloud">Cloud (OpenAI API) - Coming soon</option>
               </select>
             </div>
           </div>
@@ -48,7 +66,11 @@ export default function SettingsModal() {
             </h3>
             <div className="settings-group">
               <label className="settings-label">Theme</label>
-              <select className="settings-select" defaultValue="dark">
+              <select 
+                className="settings-select" 
+                value={theme}
+                onChange={(e) => setTheme(e.target.value)}
+              >
                 <option value="dark">Dark (Default)</option>
                 <option value="light">Light</option>
                 <option value="monokai">Monokai</option>
@@ -63,15 +85,33 @@ export default function SettingsModal() {
             </h3>
             <div className="settings-group">
               <label className="settings-label">Font Size</label>
-              <input type="number" className="settings-input" defaultValue={14} />
+              <input 
+                type="number" 
+                className="settings-input" 
+                value={fontSize} 
+                onChange={(e) => setFontSize(parseInt(e.target.value) || 14)}
+              />
             </div>
             <div className="settings-group">
               <label className="settings-label">Tab Size</label>
-              <input type="number" className="settings-input" defaultValue={2} />
+              <input 
+                type="number" 
+                className="settings-input" 
+                value={tabSize} 
+                onChange={(e) => setTabSize(parseInt(e.target.value) || 2)}
+              />
             </div>
-            <div className="settings-checkbox-group">
-              <input type="checkbox" id="format-save" defaultChecked />
-              <label htmlFor="format-save">Format on Save</label>
+            <div 
+              className="settings-checkbox-group" 
+              onClick={() => setFormatOnSave(!formatOnSave)}
+            >
+              <input 
+                type="checkbox" 
+                id="format-save" 
+                checked={formatOnSave} 
+                readOnly
+              />
+              <label htmlFor="format-save" onClick={(e) => e.preventDefault()}>Format on Save</label>
             </div>
           </div>
         </div>
@@ -214,9 +254,9 @@ export default function SettingsModal() {
         }
 
         .settings-select, .settings-input {
-          background: rgba(0, 0, 0, 0.3);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          color: #ffffff;
+          background: #000000 !important;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          color: #ffffff !important;
           padding: 8px 14px;
           border-radius: 8px;
           font-size: 13px;
@@ -226,8 +266,13 @@ export default function SettingsModal() {
           box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
         }
 
+        .settings-select option {
+          background: #0f1219;
+          color: white;
+        }
+
         .settings-select:hover, .settings-input:hover {
-          border-color: rgba(255, 255, 255, 0.2);
+          border-color: rgba(255, 255, 255, 0.4);
         }
 
         .settings-select:focus, .settings-input:focus {
@@ -258,7 +303,7 @@ export default function SettingsModal() {
         .settings-checkbox-group input[type="checkbox"] {
           width: 16px;
           height: 16px;
-          accent-color: #a78bfa;
+          accent-color: #000000;
           cursor: pointer;
         }
       `}</style>

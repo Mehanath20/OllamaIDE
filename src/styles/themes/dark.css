@@ -1,0 +1,29 @@
+body.theme-dark {
+  --background: #0a0a0a;
+  --sidebar:    #0d0d0d;
+  --editor:     #101010;
+  --ai-panel:   #0d0d0d;
+  --terminal:   #090909;
+
+  --border:      #232323;
+  --border-soft: #1a1a1a;
+
+  --text-main:      #f0f0f0;
+  --text-muted:     #6b6b6b;
+  --text-secondary: #9a9a9a;
+
+  --hover:  #161616;
+  --active: #1c1c1c;
+
+  --bg-0: #080808;
+  --bg-1: #0d0d0d;
+  --bg-2: #101010;
+  --bg-3: #161616;
+  --bg-4: #1c1c1c;
+  --bg-5: #242424;
+
+  --accent:       #7c3aed;
+  --accent-hover: #6d28d9;
+
+  color-scheme: dark;
+}

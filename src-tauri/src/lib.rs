@@ -23,6 +23,8 @@ pub fn run() {
             commands::fs::delete_path,
             commands::fs::watch_directory,
             commands::fs::search_files,
+            commands::fs::search_extensions,
+            commands::fs::download_extension,
             commands::git::git_status,
             commands::process::execute_shell,
             // Terminal — Phase 3 (new API)
