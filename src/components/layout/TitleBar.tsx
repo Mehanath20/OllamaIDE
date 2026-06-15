@@ -8,6 +8,7 @@ import { useAIStore } from "../../store/aiStore";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { getLanguageFromExt } from "../../lib/fileIcons";
+import { Plane } from "lucide-react";
 
 type MenuItemDef =
   | { type: "separator" }
@@ -162,7 +163,7 @@ const runMenuStructure: MenuItemDef[] = [
 ];
 
 const terminalMenuStructure: MenuItemDef[] = [
-  { type: "item", label: "New Terminal", shortcut: "Ctrl+Shift+`", action: "view:terminal" },
+  { type: "item", label: "New Terminal", shortcut: "Ctrl+Shift+`", action: "new-terminal" },
   { type: "item", label: "Split Terminal", shortcut: "Ctrl+Shift+5", action: "unsupported" },
   { type: "item", label: "New Terminal Window", shortcut: "Ctrl+Shift+Alt+`", action: "unsupported" },
   { type: "separator" },
@@ -292,6 +293,12 @@ export default function TitleBar() {
           } catch (e) {
             console.error("Failed to run file in terminal:", e);
           }
+          break;
+        }
+        case "new-terminal": {
+          setBottomPanelOpen(true);
+          setBottomPanelTab("terminal");
+          document.dispatchEvent(new CustomEvent("new-terminal-action"));
           break;
         }
         case "new-file": {
@@ -497,13 +504,10 @@ export default function TitleBar() {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="titlebar-left" data-tauri-drag-region>
-        <span className="titlebar-logo">
-          <svg width="16" height="16" viewBox="0 0 64 64" fill="none">
-            <path d="M20 44 L32 20 L44 44" stroke="var(--accent)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M23 38 L41 38" stroke="var(--accent)" strokeWidth="4" strokeLinecap="round" />
-          </svg>
+        <span className="titlebar-logo" style={{ color: "var(--accent)" }}>
+          <Plane size={16} fill="currentColor" strokeWidth={1} />
         </span>
-        <span className="titlebar-name">Ollama IDE</span>
+        <span className="titlebar-name">AntiNetwork</span>
       </div>
 
       <div className="titlebar-center" data-tauri-drag-region>

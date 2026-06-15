@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { GitBranch, Plus, FilePlus, FileMinus, FileEdit, RefreshCw, Check } from "lucide-react";
+import { GitBranch, Plus, FilePlus, FileMinus, FileEdit, RefreshCw, Check, Settings, ArrowDown, ArrowUp } from "lucide-react";
 import { useFileStore } from "../../store/fileStore";
 import { useEditorStore } from "../../store/editorStore";
 
@@ -15,6 +15,10 @@ export default function GitPanel() {
   const [changes, setChanges] = useState<GitFileStatus[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [showConfig, setShowConfig] = useState(false);
+  const [gitName, setGitName] = useState("");
+  const [gitEmail, setGitEmail] = useState("");
 
   const fetchStatus = async () => {
     if (!workspaceRoot) return;
@@ -59,18 +63,135 @@ export default function GitPanel() {
     }
   };
 
-  const handleCommit = () => {
-    alert("Commit functionality will be wired to the backend in Phase 4.");
+  const handleConfigSubmit = async () => {
+    if (!workspaceRoot || !gitName || !gitEmail) return;
+    try {
+      await invoke("git_config", { path: workspaceRoot, name: gitName, email: gitEmail });
+      setShowConfig(false);
+      alert("Git identity configured successfully!");
+    } catch (err: any) {
+      alert("Failed to configure git: " + err);
+    }
+  };
+
+  const handlePush = async () => {
+    if (!workspaceRoot) return;
+    setLoading(true);
+    try {
+      await invoke("git_push", { path: workspaceRoot });
+      alert("Pushed successfully!");
+    } catch (err: any) {
+      alert("Push failed: " + err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePull = async () => {
+    if (!workspaceRoot) return;
+    setLoading(true);
+    try {
+      await invoke("git_pull", { path: workspaceRoot });
+      alert("Pulled successfully!");
+      fetchStatus();
+    } catch (err: any) {
+      alert("Pull failed: " + err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStage = async (file: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!workspaceRoot) return;
+    try {
+      await invoke("git_add", { path: workspaceRoot, file });
+      await fetchStatus();
+    } catch (err: any) {
+      alert("Failed to stage file: " + err);
+    }
+  };
+
+  const handleCommit = async () => {
+    if (!workspaceRoot) return;
+    if (!commitMessage.trim()) {
+      alert("Please enter a commit message");
+      return;
+    }
+    
+    try {
+      // First, check if there are staged changes. If not, auto-stage everything?
+      // Wait, users can stage individual files using handleStage.
+      // But let's just attempt commit.
+      await invoke("git_commit", { path: workspaceRoot, message: commitMessage });
+      setCommitMessage("");
+      await fetchStatus();
+    } catch (err: any) {
+      // If error contains "nothing to commit", we could auto-stage all and commit,
+      if (err.toString().includes("nothing to commit") || err.toString().includes("no changes added to commit")) {
+        try {
+          await invoke("git_add", { path: workspaceRoot, file: "." });
+          await invoke("git_commit", { path: workspaceRoot, message: commitMessage });
+          setCommitMessage("");
+          await fetchStatus();
+        } catch (stageErr: any) {
+          if (stageErr.toString().includes("tell me who you are") || stageErr.toString().includes("identity unknown")) {
+             setShowConfig(true);
+             setError("Please configure your Git identity first.");
+          } else {
+             alert("Commit failed: " + stageErr);
+          }
+        }
+      } else if (err.toString().includes("tell me who you are") || err.toString().includes("identity unknown")) {
+        setShowConfig(true);
+        setError("Please configure your Git identity first.");
+      } else {
+        alert("Commit failed: " + err);
+      }
+    }
   };
 
   return (
     <div className="git-panel">
       <div className="panel-header-row">
         <span className="panel-header">SOURCE CONTROL</span>
-        <button className="btn-icon" onClick={fetchStatus} title="Refresh" disabled={loading}>
-          <RefreshCw size={12} className={loading ? "spin" : ""} />
-        </button>
+        <div style={{ display: "flex", gap: "4px" }}>
+          <button className="btn-icon" onClick={handlePull} title="Pull" disabled={loading}>
+            <ArrowDown size={12} />
+          </button>
+          <button className="btn-icon" onClick={handlePush} title="Push" disabled={loading}>
+            <ArrowUp size={12} />
+          </button>
+          <button className="btn-icon" onClick={() => setShowConfig(!showConfig)} title="Configure Git">
+            <Settings size={12} />
+          </button>
+          <button className="btn-icon" onClick={fetchStatus} title="Refresh" disabled={loading}>
+            <RefreshCw size={12} className={loading ? "spin" : ""} />
+          </button>
+        </div>
       </div>
+
+      {showConfig && (
+        <div className="git-config-box">
+          <div style={{ fontSize: "11px", fontWeight: 600, marginBottom: "8px" }}>GitHub Identity Setup</div>
+          <input 
+            className="commit-input" 
+            placeholder="GitHub Username" 
+            value={gitName}
+            onChange={(e) => setGitName(e.target.value)}
+            style={{ marginBottom: "4px" }}
+          />
+          <input 
+            className="commit-input" 
+            placeholder="Email address" 
+            value={gitEmail}
+            onChange={(e) => setGitEmail(e.target.value)}
+          />
+          <button className="btn-commit" onClick={handleConfigSubmit} style={{ marginTop: "8px" }}>
+            Save Configuration
+          </button>
+        </div>
+      )}
 
       {!workspaceRoot ? (
         <div className="git-empty">Open a folder to see git status</div>
@@ -82,7 +203,19 @@ export default function GitPanel() {
       ) : (
         <>
           <div className="git-commit-box">
-            <textarea className="commit-input" placeholder="Message (Ctrl+Enter to commit)" rows={3} />
+            <textarea 
+              className="commit-input" 
+              placeholder="Message (Ctrl+Enter to commit)" 
+              rows={3}
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && e.ctrlKey) {
+                  e.preventDefault();
+                  handleCommit();
+                }
+              }}
+            />
             <button className="btn-commit" onClick={handleCommit}>
               <Check size={14} /> Commit
             </button>
@@ -98,7 +231,7 @@ export default function GitPanel() {
                   <div key={i} className="git-file-item" onClick={() => handleFileClick(item.file)}>
                     {getStatusIcon(item.status)}
                     <span className="git-file-name truncate">{item.file}</span>
-                    <button className="btn-icon stage-btn" onClick={(e) => { e.stopPropagation(); alert("Stage functionality in Phase 4"); }} title="Stage changes">
+                    <button className="btn-icon stage-btn" onClick={(e) => handleStage(item.file, e)} title="Stage changes">
                       <Plus size={12} />
                     </button>
                   </div>
@@ -147,7 +280,7 @@ export default function GitPanel() {
           animation: spin 1s linear infinite;
         }
         @keyframes spin { 100% { transform: rotate(360deg); } }
-        
+
         .git-empty {
           flex: 1;
           display: flex;
@@ -158,6 +291,14 @@ export default function GitPanel() {
           text-align: center;
           color: var(--text-muted);
           font-size: var(--text-xs);
+        }
+
+        .git-config-box {
+          padding: var(--space-3);
+          background: rgba(0,0,0,0.2);
+          border-bottom: 1px solid var(--border-soft);
+          display: flex;
+          flex-direction: column;
         }
 
         .git-commit-box {

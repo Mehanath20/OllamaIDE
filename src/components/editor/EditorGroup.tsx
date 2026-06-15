@@ -9,7 +9,7 @@ import { useUIStore } from "../../store/uiStore";
 import EditorTabs from "./EditorTabs";
 import Breadcrumb from "./Breadcrumb";
 import MonacoEditor from "./MonacoEditor";
-import { FolderOpen, MessageSquare, Wrench, Zap, FileText, CheckCircle2 } from "lucide-react";
+import { FolderOpen, MessageSquare, Wrench, Zap, FileText, CheckCircle2, Plane } from "lucide-react";
 
 export default function EditorGroup() {
   const { openFiles, activeFile } = useEditorStore();
@@ -172,26 +172,11 @@ function WelcomeScreen() {
   return (
     <div className="welcome">
       <div className="welcome-content">
-        <div className="welcome-logo">
-          <svg width="72" height="72" viewBox="0 0 64 64" fill="none">
-            <rect width="64" height="64" rx="16" fill="var(--accent-soft)" />
-            <path
-              d="M20 44 L32 20 L44 44"
-              stroke="var(--accent)"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M23 38 L41 38"
-              stroke="var(--accent)"
-              strokeWidth="3"
-              strokeLinecap="round"
-            />
-          </svg>
+        <div className="welcome-logo" style={{ color: "var(--accent)" }}>
+          <Plane size={72} strokeWidth={1} />
         </div>
-
-        <h1 className="welcome-title">DeepCode Studio</h1>
+        {/* AntiNetwork branding watermark */}
+        <h1 className="welcome-title">AntiNetwork</h1>
         <p className="welcome-sub">AI-powered · Offline · Blazing fast</p>
 
         <div className="welcome-shortcuts">

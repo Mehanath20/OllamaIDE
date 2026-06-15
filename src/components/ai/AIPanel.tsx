@@ -16,22 +16,17 @@ import {
   X 
 } from "lucide-react";
 import { useAIStore } from "../../store/aiStore";
+import { useUIStore } from "../../store/uiStore";
 import {
   checkOllamaHealth,
   startOllama,
   listModels,
-  pullModel,
 } from "../../lib/ollama";
 import { runAgentTurn } from "../../lib/agent";
 import { resolveFileMentions } from "../../lib/fileUtils";
 import ChatMessage from "./ChatMessage";
 import AgentStatus from "./AgentStatus";
 
-const RECOMMENDED_MODELS = [
-  { name: "qwen2.5-coder:7b", size: "4.7 GB", desc: "Beginner" },
-  { name: "qwen2.5-coder:14b", size: "9.0 GB", desc: "Good" },
-  { name: "qwen2.5-coder:32b", size: "20.0 GB", desc: "Pro" },
-];
 
 export default function AIPanel() {
   const {
@@ -46,14 +41,12 @@ export default function AIPanel() {
     setOllamaVersion,
     setInstalledModels,
     setActiveModel,
-    setIsPulling,
-    setPullProgress,
     clearMessages,
   } = useAIStore();
+  const { setModelLibraryOpen } = useUIStore() as any;
 
   const [inputVal, setInputVal] = useState("");
   const [checking, setChecking] = useState(false);
-  const [pullInput, setPullInput] = useState(RECOMMENDED_MODELS[0].name);
   const [isStarting, setIsStarting] = useState(false);
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
   
@@ -122,38 +115,6 @@ export default function AIPanel() {
     } catch (err: any) {
       alert(`Start failed: ${err.message || err}`);
       setIsStarting(false);
-    }
-  };
-
-  const handlePullModel = async () => {
-    if (!pullInput.trim()) return;
-    setIsPulling(true);
-    setPullProgress("Requesting pull...");
-    try {
-      await pullModel(pullInput, (p) => {
-        if (p.completed && p.total) {
-          const percent = ((p.completed / p.total) * 100).toFixed(0);
-          setPullProgress(`Downloading: ${percent}% (${(p.completed/1e9).toFixed(1)} GB / ${(p.total/1e9).toFixed(1)} GB)`);
-        } else {
-          setPullProgress(p.status || "Downloading...");
-        }
-      });
-      alert(`Model ${pullInput} pulled successfully!`);
-      // Refresh models
-      const models = await listModels();
-      let pulledModel = models.find(m => m === pullInput.trim() || m.startsWith(pullInput.trim() + ":"));
-      if (!pulledModel) {
-        // Fallback: manually inject it if it hasn't registered in listModels yet
-        pulledModel = pullInput.trim() + ":latest";
-        models.push(pulledModel);
-      }
-      setInstalledModels(models);
-      setActiveModel(pulledModel);
-    } catch (err: any) {
-      alert(`Failed to pull model: ${err.message || err}`);
-    } finally {
-      setIsPulling(false);
-      setPullProgress("");
     }
   };
 
@@ -240,41 +201,7 @@ export default function AIPanel() {
               <button 
                 className="btn-pull-new" 
                 title="Download another model"
-                onClick={() => {
-                  const model = prompt("Enter model name to pull (e.g., 'llama3' or 'mistral'):");
-                  if (model && model.trim()) {
-                    setPullInput(model.trim());
-                    // use handlePullModel logic, wait we don't have access to event here easily, so just call an inline async wrapper
-                    (async () => {
-                      setIsPulling(true);
-                      setPullProgress("Requesting pull...");
-                      try {
-                        await pullModel(model.trim(), (p) => {
-                          if (p.completed && p.total) {
-                            const percent = ((p.completed / p.total) * 100).toFixed(0);
-                            setPullProgress(`Downloading: ${percent}%`);
-                          } else {
-                            setPullProgress(p.status || "Downloading...");
-                          }
-                        });
-                        alert(`Model ${model.trim()} pulled successfully!`);
-                        const models = await listModels();
-                        let pulledModel = models.find(m => m === model.trim() || m.startsWith(model.trim() + ":"));
-                        if (!pulledModel) {
-                          pulledModel = model.trim() + ":latest";
-                          models.push(pulledModel);
-                        }
-                        setInstalledModels(models);
-                        setActiveModel(pulledModel);
-                      } catch (err: any) {
-                        alert(`Failed to pull model: ${err.message || err}`);
-                      } finally {
-                        setIsPulling(false);
-                        setPullProgress("");
-                      }
-                    })();
-                  }
-                }}
+                onClick={() => setModelLibraryOpen(true)}
               >
                 <Plus size={10} />
               </button>
@@ -332,28 +259,13 @@ export default function AIPanel() {
               <p>Download a coding model to get started. Qwen2.5-Coder is highly recommended.</p>
 
               <div className="pull-model-group">
-                <input
-                  type="text"
-                  className="pull-input"
-                  placeholder="e.g. llama3, mistral, qwen..."
-                  value={pullInput}
-                  onChange={(e) => setPullInput(e.target.value)}
-                  list="recommended-models"
-                />
-                <datalist id="recommended-models">
-                  {RECOMMENDED_MODELS.map((m) => (
-                    <option key={m.name} value={m.name}>
-                      {m.desc} ({m.size})
-                    </option>
-                  ))}
-                </datalist>
                 <button
                   className="btn-action btn-action--primary"
-                  onClick={handlePullModel}
+                  onClick={() => setModelLibraryOpen(true)}
                   disabled={isPulling}
                 >
                   <Download size={14} />
-                  <span>{isPulling ? "Pulling..." : "Download Model"}</span>
+                  <span>{isPulling ? "Pulling..." : "Open Model Library"}</span>
                 </button>
               </div>
 
@@ -370,7 +282,7 @@ export default function AIPanel() {
                 {messages.length === 0 ? (
                   <div className="chat-welcome">
                     <Bot size={36} className="welcome-bot" />
-                    <h3>DeepCode Studio</h3>
+                    <h3>AntiNetwork</h3>
                     <p>Ask anything, create files, run commands.<br/>Use <code>@filename</code> to load file context.</p>
                     <div className="welcome-hints">
                       <div className="hint-chip">✦ Write code</div>

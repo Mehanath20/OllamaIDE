@@ -14,6 +14,7 @@ import AICommandPalette from "./components/ui/AICommandPalette";
 import CommandPalette from "./components/ui/CommandPalette";
 import SettingsModal from "./components/ui/SettingsModal";
 import AboutModal from "./components/ui/AboutModal";
+import ModelManagerModal from "./components/ui/ModelManagerModal";
 import { useUIStore } from "./store/uiStore";
 import { useInlineCompletions } from "./components/ai/InlineSuggest";
 import DiffReview from "./components/ai/DiffReview";
@@ -33,6 +34,7 @@ export default function App() {
     setCommandPaletteOpen,
     setQuickOpenOpen,
     setAiCommandPaletteOpen,
+    setModelLibraryOpen,
   } = useUIStore();
 
   // Global keyboard shortcuts
@@ -71,9 +73,10 @@ export default function App() {
         setCommandPaletteOpen(false);
         setQuickOpenOpen(false);
         setAiCommandPaletteOpen(false);
+        setModelLibraryOpen(false);
       }
     },
-    [commandPaletteOpen, quickOpenOpen, bottomPanelOpen, aiCommandPaletteOpen, setCommandPaletteOpen, setQuickOpenOpen, setBottomPanelOpen, setAiCommandPaletteOpen]
+    [commandPaletteOpen, quickOpenOpen, bottomPanelOpen, aiCommandPaletteOpen, setCommandPaletteOpen, setQuickOpenOpen, setBottomPanelOpen, setAiCommandPaletteOpen, setModelLibraryOpen]
   );
 
   useEffect(() => {
@@ -162,6 +165,7 @@ export default function App() {
       <DiffReview />
       <SettingsModal />
       <AboutModal />
+      <ModelManagerModal />
 
       <style>{`
         .app-shell {

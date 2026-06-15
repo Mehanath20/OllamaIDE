@@ -95,6 +95,16 @@ export default function BottomPanel() {
     if (sessions.length === 0) {
       newTerminal();
     }
+    
+    // Listen for global "new-terminal-action" from TitleBar
+    const handleNewTerminalAction = () => {
+      newTerminal();
+    };
+    document.addEventListener("new-terminal-action", handleNewTerminalAction);
+    
+    return () => {
+      document.removeEventListener("new-terminal-action", handleNewTerminalAction);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

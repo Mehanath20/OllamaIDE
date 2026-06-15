@@ -1,5 +1,5 @@
 import { useUIStore } from "../../store/uiStore";
-import { X, CheckCircle } from "lucide-react";
+import { X, CheckCircle, Plane } from "lucide-react";
 
 export default function AboutModal() {
   const { aboutOpen, setAboutOpen } = useUIStore();
@@ -14,13 +14,10 @@ export default function AboutModal() {
         </button>
 
         <div className="about-header">
-          <div className="about-logo">
-            <svg width="48" height="48" viewBox="0 0 64 64" fill="none">
-              <path d="M20 44 L32 20 L44 44" stroke="var(--accent)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M23 38 L41 38" stroke="var(--accent)" strokeWidth="4" strokeLinecap="round" />
-            </svg>
+          <div className="about-logo" style={{ color: "var(--accent)" }}>
+            <Plane size={32} fill="currentColor" strokeWidth={1} />
           </div>
-          <h2>Ollama IDE</h2>
+          <h2>AntiNetwork</h2>
           <p className="version">Version 0.1.0 (Phase 2 Preview)</p>
         </div>
 

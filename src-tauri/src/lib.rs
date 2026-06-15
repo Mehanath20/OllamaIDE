@@ -26,6 +26,12 @@ pub fn run() {
             commands::fs::search_extensions,
             commands::fs::download_extension,
             commands::git::git_status,
+            commands::git::git_add,
+            commands::git::git_commit,
+            commands::git::git_init,
+            commands::git::git_config,
+            commands::git::git_push,
+            commands::git::git_pull,
             commands::process::execute_shell,
             // Terminal — Phase 3 (new API)
             commands::terminal::create_terminal,

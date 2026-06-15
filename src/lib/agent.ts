@@ -1,9 +1,7 @@
 /* ============================================================
-   agent.ts — DeepCode Studio Agent Engine
-   
-   This is an autonomous coding agent that ACTS immediately.
-   It does NOT describe steps — it performs them directly using
-   XML action tags that the system parses and executes.
+   agent.ts — AntiNetwork Agent Engine
+   Handles calling the Ollama local model with specialized IDE system prompt,
+   parsing JSON commands, and dispatching to Tauri backend.
    ============================================================ */
 import { invoke } from "@tauri-apps/api/core";
 import { useAIStore, ChatMessage, AgentStep } from "../store/aiStore";
@@ -15,7 +13,7 @@ import { getWorkspaceContext } from "./fileUtils";
 // Max messages kept in sliding context window
 const MAX_HISTORY_MESSAGES = 20;
 
-const AGENT_SYSTEM_PROMPT = `You are DeepCode, an autonomous AI Pro Developer coding agent inside DeepCode Studio.
+const AGENT_SYSTEM_PROMPT = `You are AntiNetwork, an autonomous AI Pro Developer coding agent inside the AntiNetwork IDE.
 You have DIRECT access to the filesystem and terminal. You DO NOT explain — you ACT.
 
 ## CORE MANDATE

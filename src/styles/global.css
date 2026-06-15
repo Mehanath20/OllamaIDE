@@ -1,6 +1,6 @@
 /* ============================================================
-   DESIGN SYSTEM — DeepCode Studio
-   All CSS custom properties live here. Import this first.
+   DESIGN SYSTEM — AntiNetwork
+   VS Code inspired colors, tokens, and core components
    ============================================================ */
 
 /* Local fonts — no internet required */
@@ -15,42 +15,42 @@
 /* ── Color Palette ─────────────────────────────────────────── */
 :root {
   /* Surface scale */
-  --background: #0a0a0a;
-  --sidebar:    #0d0d0d;
-  --editor:     #101010;
-  --ai-panel:   #0d0d0d;
-  --terminal:   #090909;
+  --background: #181818;
+  --sidebar:    #181818;
+  --editor:     #1f1f1f;
+  --ai-panel:   #181818;
+  --terminal:   #181818;
 
   /* Borders */
-  --border:      #232323;
-  --border-soft: #1a1a1a;
+  --border:      #2b2d31;
+  --border-soft: #222222;
 
   /* Text */
-  --text-main:      #f0f0f0;
-  --text-muted:     #6b6b6b;
-  --text-secondary: #9a9a9a;
+  --text-main:      #cccccc;
+  --text-muted:     #858585;
+  --text-secondary: #9d9d9d;
 
   /* Surfaces */
-  --hover:  #161616;
-  --active: #1c1c1c;
+  --hover:  #2a2d2e;
+  --active: #37373d;
 
   /* Legacy background scale (aliased) */
-  --bg-0: #080808;
-  --bg-1: #0d0d0d;
-  --bg-2: #101010;
-  --bg-3: #161616;
-  --bg-4: #1c1c1c;
-  --bg-5: #242424;
+  --bg-0: #181818;
+  --bg-1: #181818;
+  --bg-2: #1f1f1f;
+  --bg-3: #2a2d2e;
+  --bg-4: #37373d;
+  --bg-5: #3f3f46;
 
   /* Text aliases */
   --text-primary:   var(--text-main);
-  --text-inverse:   #000000;
+  --text-inverse:   #ffffff;
 
-  /* ── Accent — indigo/violet for IDE actions ── */
-  --accent:       #7c3aed;
-  --accent-hover: #6d28d9;
-  --accent-soft:  rgba(124, 58, 237, 0.15);
-  --accent-glow:  rgba(124, 58, 237, 0.4);
+  /* ── Accent — VS Code Blue ── */
+  --accent:       #007fd4;
+  --accent-hover: #006ab1;
+  --accent-soft:  rgba(0, 127, 212, 0.15);
+  --accent-glow:  rgba(0, 127, 212, 0.4);
 
   /* ── Semantic Status Colors ── */
   --success: #10b981;

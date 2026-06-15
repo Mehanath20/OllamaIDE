@@ -28,6 +28,7 @@ interface UIState {
   cursorPosition: CursorPosition | null;
   selectedCode: string | null;
   installedExtensions: any[]; // Store extension objects
+  modelLibraryOpen: boolean;
 
   setTheme: (theme: Theme) => void;
   setFontSize: (s: number) => void;
@@ -47,6 +48,7 @@ interface UIState {
   setCursorPosition: (pos: CursorPosition) => void;
   setSelectedCode: (code: string | null) => void;
   setInstalledExtensions: (exts: any[] | ((prev: any[]) => any[])) => void;
+  setModelLibraryOpen: (v: boolean) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -70,6 +72,7 @@ export const useUIStore = create<UIState>()(
   cursorPosition: null,
   selectedCode: null,
   installedExtensions: [],
+  modelLibraryOpen: false,
 
   setTheme: (theme) => set({ theme }),
   setFontSize: (fontSize) => set({ fontSize }),
@@ -91,6 +94,7 @@ export const useUIStore = create<UIState>()(
   setInstalledExtensions: (exts) => set((state) => ({ 
     installedExtensions: typeof exts === 'function' ? exts(state.installedExtensions) : exts 
   })),
+  setModelLibraryOpen: (modelLibraryOpen) => set({ modelLibraryOpen }),
     }),
     {
       name: 'ollama-ide-ui-storage',
