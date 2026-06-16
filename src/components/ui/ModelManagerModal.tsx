@@ -20,6 +20,8 @@ const RECOMMENDED_MODELS = [
   // DeepSeek Series
   { name: "deepseek-coder-v2:16b", size: "8.9 GB", params: "16B", desc: "Powerful mixture-of-experts coding model." },
   { name: "deepseek-coder-v2:236b", size: "133.0 GB", params: "236B", desc: "Ultimate MoE model. Insane hardware needed." },
+  // GLM Series
+  { name: "glm4:9b", size: "5.5 GB", params: "9B", desc: "Zhipu AI's powerful multilingual and coding model." },
   // Other Great Models
   { name: "mistral-nemo:latest", size: "7.1 GB", params: "12B", desc: "Mistral & Nvidia's highly capable 12B architecture." },
   { name: "gemma2:27b", size: "16.0 GB", params: "27B", desc: "Google's heavy Gemma 2 model with deep logic." },

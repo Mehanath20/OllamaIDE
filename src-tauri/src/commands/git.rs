@@ -11,6 +11,8 @@ pub struct GitFileStatus {
 pub fn git_status(path: String) -> Result<Vec<GitFileStatus>, String> {
     let output = Command::new("git")
         .current_dir(&path)
+        .arg("-c")
+        .arg("core.quotePath=false")
         .arg("status")
         .arg("--porcelain")
         .output()

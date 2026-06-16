@@ -22,12 +22,15 @@ interface FileState {
   setTree: (tree: FileNode[]) => void;
   setCreatingItem: (item: CreatingItem | null) => void;
   toggleExpanded: (path: string) => void;
+  gitRefreshTrigger: number;
+  triggerGitRefresh: () => void;
 }
 
 export const useFileStore = create<FileState>((set) => ({
   workspaceRoot: null,
   tree: [],
   creatingItem: null,
+  gitRefreshTrigger: 0,
 
   setWorkspaceRoot: (root) => set({ workspaceRoot: root }),
   setTree: (tree) => set({ tree }),
@@ -37,6 +40,7 @@ export const useFileStore = create<FileState>((set) => ({
     set((s) => ({
       tree: toggleNode(s.tree, path),
     })),
+  triggerGitRefresh: () => set((state) => ({ gitRefreshTrigger: state.gitRefreshTrigger + 1 })),
 }));
 
 function toggleNode(nodes: FileNode[], path: string): FileNode[] {

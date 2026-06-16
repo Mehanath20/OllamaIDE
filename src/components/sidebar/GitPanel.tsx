@@ -10,7 +10,7 @@ interface GitFileStatus {
 }
 
 export default function GitPanel() {
-  const { workspaceRoot } = useFileStore();
+  const { workspaceRoot, gitRefreshTrigger } = useFileStore();
   const { openFile } = useEditorStore();
   const [changes, setChanges] = useState<GitFileStatus[]>([]);
   const [loading, setLoading] = useState(false);
@@ -36,7 +36,7 @@ export default function GitPanel() {
 
   useEffect(() => {
     fetchStatus();
-  }, [workspaceRoot]);
+  }, [workspaceRoot, gitRefreshTrigger]);
 
   const getStatusIcon = (status: string) => {
     if (status.includes("A") || status.includes("?")) return <FilePlus size={14} className="text-green" />;
