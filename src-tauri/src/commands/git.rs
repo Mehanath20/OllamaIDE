@@ -24,7 +24,7 @@ pub fn git_status(path: String) -> Result<Vec<GitFileStatus>, String> {
     let mut results = Vec::new();
     for line in stdout.lines() {
         if line.len() > 3 {
-            let status = line[0..2].trim().to_string();
+            let status = line[0..2].to_string();
             let file = line[3..].to_string();
             results.push(GitFileStatus { file, status });
         }
@@ -37,6 +37,23 @@ pub fn git_add(path: String, file: String) -> Result<(), String> {
     let output = Command::new("git")
         .current_dir(&path)
         .arg("add")
+        .arg(&file)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_reset(path: String, file: String) -> Result<(), String> {
+    let output = Command::new("git")
+        .current_dir(&path)
+        .arg("reset")
+        .arg("HEAD")
+        .arg("--")
         .arg(&file)
         .output()
         .map_err(|e| e.to_string())?;

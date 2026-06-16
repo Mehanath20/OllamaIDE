@@ -26,6 +26,7 @@ pub fn run() {
             commands::fs::download_extension,
             commands::git::git_status,
             commands::git::git_add,
+            commands::git::git_reset,
             commands::git::git_commit,
             commands::git::git_init,
             commands::git::git_config,

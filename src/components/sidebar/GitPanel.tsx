@@ -112,6 +112,17 @@ export default function GitPanel() {
     }
   };
 
+  const handleUnstage = async (file: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!workspaceRoot) return;
+    try {
+      await invoke("git_reset", { path: workspaceRoot, file });
+      await fetchStatus();
+    } catch (err: any) {
+      alert("Failed to unstage file: " + err);
+    }
+  };
+
   const handleCommit = async () => {
     if (!workspaceRoot) return;
     if (!commitMessage.trim()) {
@@ -119,30 +130,19 @@ export default function GitPanel() {
       return;
     }
     
+    // Only commit if there are actually staged files.
+    const hasStaged = changes.some(c => c.status[0] !== ' ' && c.status[0] !== '?');
+    
     try {
-      // First, check if there are staged changes. If not, auto-stage everything?
-      // Wait, users can stage individual files using handleStage.
-      // But let's just attempt commit.
+      if (!hasStaged) {
+        // Auto-stage all fallback
+        await invoke("git_add", { path: workspaceRoot, file: "." });
+      }
       await invoke("git_commit", { path: workspaceRoot, message: commitMessage });
       setCommitMessage("");
       await fetchStatus();
     } catch (err: any) {
-      // If error contains "nothing to commit", we could auto-stage all and commit,
-      if (err.toString().includes("nothing to commit") || err.toString().includes("no changes added to commit")) {
-        try {
-          await invoke("git_add", { path: workspaceRoot, file: "." });
-          await invoke("git_commit", { path: workspaceRoot, message: commitMessage });
-          setCommitMessage("");
-          await fetchStatus();
-        } catch (stageErr: any) {
-          if (stageErr.toString().includes("tell me who you are") || stageErr.toString().includes("identity unknown")) {
-             setShowConfig(true);
-             setError("Please configure your Git identity first.");
-          } else {
-             alert("Commit failed: " + stageErr);
-          }
-        }
-      } else if (err.toString().includes("tell me who you are") || err.toString().includes("identity unknown")) {
+      if (err.toString().includes("tell me who you are") || err.toString().includes("identity unknown")) {
         setShowConfig(true);
         setError("Please configure your Git identity first.");
       } else {
@@ -150,6 +150,9 @@ export default function GitPanel() {
       }
     }
   };
+
+  const stagedChanges = changes.filter(c => c.status[0] !== ' ' && c.status[0] !== '?');
+  const unstagedChanges = changes.filter(c => c.status[1] !== ' ' && c.status !== '  ');
 
   return (
     <div className="git-panel">
@@ -222,21 +225,52 @@ export default function GitPanel() {
           </div>
           
           <div className="git-changes">
-            <div className="changes-header">Changes ({changes.length})</div>
-            <div className="changes-list">
-              {changes.length === 0 ? (
-                <div className="git-empty" style={{ padding: "10px", fontSize: "10px" }}>No changes working tree clean</div>
-              ) : (
-                changes.map((item, i) => (
-                  <div key={i} className="git-file-item" onClick={() => handleFileClick(item.file)}>
-                    {getStatusIcon(item.status)}
-                    <span className="git-file-name truncate">{item.file}</span>
-                    <button className="btn-icon stage-btn" onClick={(e) => handleStage(item.file, e)} title="Stage changes">
-                      <Plus size={12} />
-                    </button>
-                  </div>
-                ))
-              )}
+            {stagedChanges.length > 0 && (
+              <div className="changes-section">
+                <div className="changes-header" style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>Staged Changes ({stagedChanges.length})</span>
+                  <button className="btn-icon stage-btn" onClick={(e) => handleUnstage(".", e)} title="Unstage all changes">
+                    <FileMinus size={12} />
+                  </button>
+                </div>
+                <div className="changes-list">
+                  {stagedChanges.map((item, i) => (
+                    <div key={i} className="git-file-item" onClick={() => handleFileClick(item.file)}>
+                      {getStatusIcon(item.status)}
+                      <span className="git-file-name truncate">{item.file}</span>
+                      <button className="btn-icon stage-btn" onClick={(e) => handleUnstage(item.file, e)} title="Unstage changes">
+                        <FileMinus size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="changes-section">
+              <div className="changes-header" style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Changes ({unstagedChanges.length})</span>
+                {unstagedChanges.length > 0 && (
+                  <button className="btn-icon stage-btn" onClick={(e) => handleStage(".", e)} title="Stage all changes">
+                    <Plus size={12} />
+                  </button>
+                )}
+              </div>
+              <div className="changes-list">
+                {unstagedChanges.length === 0 ? (
+                  <div className="git-empty" style={{ padding: "10px", fontSize: "10px" }}>No unstaged changes</div>
+                ) : (
+                  unstagedChanges.map((item, i) => (
+                    <div key={i} className="git-file-item" onClick={() => handleFileClick(item.file)}>
+                      {getStatusIcon(item.status)}
+                      <span className="git-file-name truncate">{item.file}</span>
+                      <button className="btn-icon stage-btn" onClick={(e) => handleStage(item.file, e)} title="Stage changes">
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </>
@@ -345,13 +379,22 @@ export default function GitPanel() {
           flex: 1;
           overflow-y: auto;
         }
+        .changes-section {
+          display: flex;
+          flex-direction: column;
+        }
         .changes-header {
+          display: flex;
+          align-items: center;
           font-size: 10px;
           font-weight: 700;
           text-transform: uppercase;
-          padding: var(--space-2) var(--space-3);
+          padding: 2px var(--space-3);
           color: var(--text-muted);
           background: rgba(0,0,0,0.2);
+        }
+        .changes-header:hover .stage-btn {
+          opacity: 1;
         }
         .git-file-item {
           display: flex;
