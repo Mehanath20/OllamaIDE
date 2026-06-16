@@ -1,5 +1,5 @@
 import { useUIStore } from "../../store/uiStore";
-import { X, CheckCircle, Plane } from "lucide-react";
+import { X, CheckCircle } from "lucide-react";
 
 export default function AboutModal() {
   const { aboutOpen, setAboutOpen } = useUIStore();
@@ -14,8 +14,8 @@ export default function AboutModal() {
         </button>
 
         <div className="about-header">
-          <div className="about-logo" style={{ color: "var(--accent)" }}>
-            <Plane size={32} fill="currentColor" strokeWidth={1} />
+          <div className="about-logo">
+            <img src="/icon.png" alt="App Logo" width="48" height="48" style={{ borderRadius: '12px' }} />
           </div>
           <h2>AntiNetwork</h2>
           <p className="version">Version 0.1.0 (Phase 2 Preview)</p>

@@ -8,7 +8,7 @@ import { useAIStore } from "../../store/aiStore";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { getLanguageFromExt } from "../../lib/fileIcons";
-import { Plane } from "lucide-react";
+
 
 type MenuItemDef =
   | { type: "separator" }
@@ -504,8 +504,8 @@ export default function TitleBar() {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="titlebar-left" data-tauri-drag-region>
-        <span className="titlebar-logo" style={{ color: "var(--accent)" }}>
-          <Plane size={16} fill="currentColor" strokeWidth={1} />
+        <span className="titlebar-logo">
+          <img src="/icon.png" alt="Logo" width="16" height="16" style={{ borderRadius: '4px' }} />
         </span>
         <span className="titlebar-name">AntiNetwork</span>
       </div>

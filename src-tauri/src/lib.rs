@@ -1,4 +1,3 @@
-use tauri::Manager;
 use crate::state::AppState;
 
 mod state;

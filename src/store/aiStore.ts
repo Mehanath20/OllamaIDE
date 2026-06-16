@@ -41,6 +41,7 @@ interface AIState {
 
   // Agent State
   agentMode: boolean;
+  agentAborted: boolean; // set to true by Stop button to halt the async loop
   agentStatus: "idle" | "thinking" | "reading" | "executing" | "generating";
   agentSteps: AgentStep[];
   agentLogs: string[];
@@ -63,6 +64,7 @@ interface AIState {
   setPullProgress: (v: string) => void;
 
   setAgentMode: (v: boolean) => void;
+  setAgentAborted: (v: boolean) => void;
   setAgentStatus: (status: "idle" | "thinking" | "reading" | "executing" | "generating") => void;
   setAgentSteps: (steps: AgentStep[]) => void;
   updateAgentStepStatus: (id: string, status: "pending" | "running" | "completed" | "failed") => void;
@@ -87,6 +89,7 @@ export const useAIStore = create<AIState>((set) => ({
   pullProgress: "",
 
   agentMode: false,
+  agentAborted: false,
   agentStatus: "idle",
   agentSteps: [],
   agentLogs: [],
@@ -115,6 +118,7 @@ export const useAIStore = create<AIState>((set) => ({
   setPullProgress: (pullProgress) => set({ pullProgress }),
 
   setAgentMode: (agentMode) => set({ agentMode }),
+  setAgentAborted: (agentAborted) => set({ agentAborted }),
   setAgentStatus: (agentStatus) => set({ agentStatus }),
   setAgentSteps: (agentSteps) => set({ agentSteps }),
   updateAgentStepStatus: (id, status) =>
@@ -127,6 +131,7 @@ export const useAIStore = create<AIState>((set) => ({
   clearAgentState: () =>
     set({
       agentStatus: "idle",
+      agentAborted: true,  // signal the loop to stop
       agentSteps: [],
       agentLogs: [],
       pendingFileChange: null,

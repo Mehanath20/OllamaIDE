@@ -1,5 +1,4 @@
 use std::process::Command;
-use std::time::Duration;
 
 #[tauri::command]
 pub fn execute_shell(cmd: String, cwd: String) -> Result<String, String> {

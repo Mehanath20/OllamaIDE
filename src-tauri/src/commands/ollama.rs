@@ -3,13 +3,6 @@ use std::process::Command;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Serialize)]
-pub struct OllamaModel {
-    pub name: String,
-    pub size: u64,
-    pub modified_at: String,
-}
-
-#[derive(Debug, Serialize)]
 pub struct OllamaHealth {
     pub running: bool,
     pub version: Option<String>,
