@@ -24,6 +24,7 @@ import {
 } from "../../store/terminalStore";
 import { useFileStore } from "../../store/fileStore";
 import { useUIStore } from "../../store/uiStore";
+import { useDebugStore } from "../../store/useDebugStore";
 import XtermTerminal from "../terminal/XtermTerminal";
 
 // ─── Panel tab types ─────────────────────────────────────────────────────────
@@ -299,14 +300,68 @@ export default function BottomPanel() {
 
         {/* Debug Console tab */}
         {bottomPanelTab === "debug" && (
-          <div className="panel-placeholder-content">
+          <div className="panel-debug-content">
             <div className="panel-output-header">
               <span>Debug Console</span>
+              {useDebugStore.getState().isActive && (
+                <div className="debug-toolbar">
+                  {useDebugStore.getState().isPaused ? (
+                    <>
+                      <button onClick={() => useDebugStore.getState().resume()}>▶ Continue</button>
+                      <button onClick={() => useDebugStore.getState().stepOver()}>↷ Step Over</button>
+                      <button onClick={() => useDebugStore.getState().stepInto()}>↓ Step Into</button>
+                      <button onClick={() => useDebugStore.getState().stepOut()}>↑ Step Out</button>
+                    </>
+                  ) : (
+                    <button onClick={() => useDebugStore.getState().pause()}>⏸ Pause</button>
+                  )}
+                  <button onClick={() => useDebugStore.getState().stopSession()} style={{ color: "var(--error)" }}>⏹ Stop</button>
+                </div>
+              )}
             </div>
-            <div className="panel-output-body">
-              <div className="output-line output-line--muted">
-                Debug adapter integration coming in Phase 4.
-              </div>
+            <div className="panel-debug-body" style={{ display: 'flex', flexDirection: 'row', flex: 1, overflow: 'hidden' }}>
+              {!useDebugStore.getState().isActive ? (
+                <div className="panel-output-body" style={{ flex: 1 }}>
+                  <div className="output-line output-line--muted">
+                    No active debug session. Set breakpoints in the editor and click "Start Debugging" in the Run menu.
+                  </div>
+                  <button className="btn-primary" style={{ marginTop: '10px' }} onClick={() => useDebugStore.getState().startSession("node", ["--inspect-brk", "test.js"])}>
+                    Start Demo Node Debugger (test.js)
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="debug-sidebar" style={{ width: '250px', borderRight: '1px solid var(--border-soft)', padding: '10px', overflowY: 'auto' }}>
+                    <div className="debug-section">
+                      <h4>VARIABLES</h4>
+                      {Object.keys(useDebugStore.getState().variables).length === 0 && <span className="text-muted">No variables</span>}
+                      {Object.entries(useDebugStore.getState().variables).map(([refId, vars]) => (
+                        <div key={refId}>
+                          {vars.map(v => (
+                            <div key={v.name} className="debug-var">
+                              <span className="var-name">{v.name}:</span>
+                              <span className="var-value">{v.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                    
+                    <div className="debug-section" style={{ marginTop: '20px' }}>
+                      <h4>CALL STACK</h4>
+                      {useDebugStore.getState().stackFrames.length === 0 && <span className="text-muted">Not paused</span>}
+                      {useDebugStore.getState().stackFrames.map(f => (
+                        <div key={f.id} className="debug-frame" onClick={() => useDebugStore.getState().fetchScopes(f.id)}>
+                          {f.name} <span className="frame-line">{f.source?.name}:{f.line}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="debug-console-output" style={{ flex: 1, padding: '10px', overflowY: 'auto', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
+                    <div className="output-line output-line--muted">Debug adapter connected. Waiting for output...</div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -622,6 +677,56 @@ export default function BottomPanel() {
           padding: 1px 5px;
           font-size: 0.9em;
         }
+
+        /* ─── Debug Styles ─── */
+        .panel-debug-content {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .debug-toolbar {
+          display: flex;
+          gap: 8px;
+        }
+        .debug-toolbar button {
+          background: var(--bg-3);
+          border: 1px solid var(--border-soft);
+          color: var(--text-primary);
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          cursor: pointer;
+        }
+        .debug-toolbar button:hover {
+          background: var(--bg-4);
+        }
+        .debug-section h4 {
+          font-size: 10px;
+          color: var(--text-muted);
+          margin-bottom: 6px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        .debug-var {
+          font-family: var(--font-mono);
+          font-size: 12px;
+          padding: 2px 0;
+          display: flex;
+          gap: 6px;
+        }
+        .var-name { color: #818cf8; }
+        .var-value { color: #a3e635; }
+        
+        .debug-frame {
+          font-family: var(--font-mono);
+          font-size: 12px;
+          padding: 4px;
+          cursor: pointer;
+          color: var(--text-primary);
+        }
+        .debug-frame:hover { background: var(--bg-3); }
+        .frame-line { color: var(--text-muted); font-size: 11px; margin-left: 6px; }
       `}</style>
     </div>
   );

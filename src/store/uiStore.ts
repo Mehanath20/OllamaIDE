@@ -29,6 +29,7 @@ interface UIState {
   selectedCode: string | null;
   installedExtensions: any[]; // Store extension objects
   modelLibraryOpen: boolean;
+  branchSelectorOpen: boolean;
 
   setTheme: (theme: Theme) => void;
   setFontSize: (s: number) => void;
@@ -49,6 +50,8 @@ interface UIState {
   setSelectedCode: (code: string | null) => void;
   setInstalledExtensions: (exts: any[] | ((prev: any[]) => any[])) => void;
   setModelLibraryOpen: (v: boolean) => void;
+  setBranchSelectorOpen: (v: boolean) => void;
+  registerExtensionCommand: (id: string, callback: (...args: any[]) => void) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -73,6 +76,7 @@ export const useUIStore = create<UIState>()(
   selectedCode: null,
   installedExtensions: [],
   modelLibraryOpen: false,
+  branchSelectorOpen: false,
 
   setTheme: (theme) => set({ theme }),
   setFontSize: (fontSize) => set({ fontSize }),
@@ -95,6 +99,12 @@ export const useUIStore = create<UIState>()(
     installedExtensions: typeof exts === 'function' ? exts(state.installedExtensions) : exts 
   })),
   setModelLibraryOpen: (modelLibraryOpen) => set({ modelLibraryOpen }),
+  setBranchSelectorOpen: (branchSelectorOpen) => set({ branchSelectorOpen }),
+  registerExtensionCommand: (id, callback) => {
+    // Just a placeholder to show it exists; usually command palette will read from a registry
+    // But since CommandPalette is generic, we'll store it globally or dispatch an event
+    window.dispatchEvent(new CustomEvent('extension-command-registered', { detail: { id, callback } }));
+  },
     }),
     {
       name: 'ollama-ide-ui-storage',

@@ -6,28 +6,84 @@
 import { useEditorStore } from "../../store/editorStore";
 import { useUIStore } from "../../store/uiStore";
 
+import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
 import EditorTabs from "./EditorTabs";
 import Breadcrumb from "./Breadcrumb";
 import MonacoEditor from "./MonacoEditor";
-import { FolderOpen, MessageSquare, Wrench, Zap, FileText, CheckCircle2, Plane } from "lucide-react";
+import DiffEditor from "./DiffEditor";
+import { FolderOpen, MessageSquare, Wrench, Zap, FileText, CheckCircle2, Plane, SplitSquareHorizontal } from "lucide-react";
 
 export default function EditorGroup() {
-  const { openFiles, activeFile } = useEditorStore();
+  const { openFiles, activeFile, splitMode, splitActiveFile, toggleSplitMode } = useEditorStore();
   const { selectedCode, setAgentPanelOpen } = useUIStore();
   const activeFileData = openFiles.find((f) => f.path === activeFile);
 
   const handleInlineAction = (action: string) => {
-    // In a full implementation, this would pipe to the AI panel's input and trigger a send.
-    // For now, just open the AI panel and alert or we could add a temporary store variable.
     setAgentPanelOpen(true);
     alert(`Triggered inline action: ${action} on selected code.`);
   };
+
+  const renderEditorBody = (currentActiveFile: string | null) => (
+    <div className="editor-body">
+      {openFiles.map((file) => (
+        <div
+          key={file.path}
+          className="editor-pane"
+          style={{ display: file.path === currentActiveFile ? "flex" : "none" }}
+        >
+          {file.isDiff ? (
+            <DiffEditor
+              original={file.originalContent || ""}
+              modified={file.content}
+              language={file.language}
+            />
+          ) : (
+            <MonacoEditor
+              path={file.path}
+              content={file.content}
+              language={file.language}
+            />
+          )}
+        </div>
+      ))}
+
+      {/* Inline AI Actions Bar */}
+      {selectedCode && currentActiveFile === activeFile && (
+        <div className="inline-ai-actions">
+          <button className="inline-action-btn" onClick={() => handleInlineAction("Explain")}>
+            <MessageSquare size={12} /> Explain
+          </button>
+          <button className="inline-action-btn" onClick={() => handleInlineAction("Fix")}>
+            <Wrench size={12} /> Fix
+          </button>
+          <button className="inline-action-btn" onClick={() => handleInlineAction("Optimize")}>
+            <Zap size={12} /> Optimize
+          </button>
+          <button className="inline-action-btn" onClick={() => handleInlineAction("Document")}>
+            <FileText size={12} /> Document
+          </button>
+          <button className="inline-action-btn" onClick={() => handleInlineAction("Test")}>
+            <CheckCircle2 size={12} /> Test
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="editor-group">
       {openFiles.length > 0 ? (
         <>
-          <EditorTabs />
+          <div style={{ display: "flex", width: "100%" }}>
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <EditorTabs />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", padding: "0 8px", background: "var(--bg-1)", borderBottom: "1px solid var(--border-soft)" }}>
+              <button className="btn-icon" title="Split Editor" onClick={toggleSplitMode}>
+                <SplitSquareHorizontal size={14} />
+              </button>
+            </div>
+          </div>
           {activeFileData && (
             <>
               {/* AI Context Bar */}
@@ -38,44 +94,23 @@ export default function EditorGroup() {
                 </span>
               </div>
               <Breadcrumb />
-              <div className="editor-body">
-                {openFiles.map((file) => (
-                  <div
-                    key={file.path}
-                    className="editor-pane"
-                    style={{ display: file.path === activeFile ? "flex" : "none" }}
-                  >
-                    <MonacoEditor
-                      path={file.path}
-                      content={file.content}
-                      language={file.language}
-                    />
-                  </div>
-                ))}
-
-                {/* Inline AI Actions Bar */}
-                {selectedCode && (
-                  <div className="inline-ai-actions">
-                    <button className="inline-action-btn" onClick={() => handleInlineAction("Explain")}>
-                      <MessageSquare size={12} /> Explain
-                    </button>
-                    <button className="inline-action-btn" onClick={() => handleInlineAction("Fix")}>
-                      <Wrench size={12} /> Fix
-                    </button>
-                    <button className="inline-action-btn" onClick={() => handleInlineAction("Optimize")}>
-                      <Zap size={12} /> Optimize
-                    </button>
-                    <button className="inline-action-btn" onClick={() => handleInlineAction("Document")}>
-                      <FileText size={12} /> Document
-                    </button>
-                    <button className="inline-action-btn" onClick={() => handleInlineAction("Test")}>
-                      <CheckCircle2 size={12} /> Test
-                    </button>
-                  </div>
-                )}
-              </div>
+              
+              {splitMode ? (
+                <PanelGroup direction="horizontal" autoSaveId="ide-split-editor">
+                  <Panel id="left-editor" minSize={20}>
+                    {renderEditorBody(activeFile)}
+                  </Panel>
+                  <PanelResizeHandle className="resize-handle resize-handle--vertical" />
+                  <Panel id="right-editor" minSize={20}>
+                    {renderEditorBody(splitActiveFile)}
+                  </Panel>
+                </PanelGroup>
+              ) : (
+                renderEditorBody(activeFile)
+              )}
             </>
           )}
+
         </>
       ) : (
         <WelcomeScreen />

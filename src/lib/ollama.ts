@@ -82,3 +82,11 @@ export async function generateCompletion(
 ): Promise<string> {
   return invoke<string>("generate_completion", { model, prompt });
 }
+
+export async function cancelModelPull(model: string): Promise<void> {
+  return invoke("cancel_pull_model", { model });
+}
+
+export async function deleteModel(model: string): Promise<void> {
+  return invoke("delete_model", { model });
+}

@@ -6,14 +6,21 @@ export interface OpenFile {
   content: string;
   language: string;
   isDirty: boolean;
+  isDiff?: boolean;
+  originalContent?: string;
 }
 
 interface EditorState {
   openFiles: OpenFile[];
   activeFile: string | null;          // path of active tab
+  splitMode: boolean;                 // true if split editor is enabled
+  splitActiveFile: string | null;     // active file in the right split
+
   openFile: (file: OpenFile) => void;
   closeFile: (path: string) => void;
   setActiveFile: (path: string) => void;
+  setSplitActiveFile: (path: string | null) => void;
+  toggleSplitMode: () => void;
   updateContent: (path: string, content: string) => void;
   markSaved: (path: string) => void;
 }
@@ -21,6 +28,8 @@ interface EditorState {
 export const useEditorStore = create<EditorState>((set) => ({
   openFiles: [],
   activeFile: null,
+  splitMode: false,
+  splitActiveFile: null,
 
   openFile: (file) =>
     set((s) => {
@@ -48,6 +57,11 @@ export const useEditorStore = create<EditorState>((set) => ({
     }),
 
   setActiveFile: (path) => set({ activeFile: path }),
+  setSplitActiveFile: (path) => set({ splitActiveFile: path }),
+  toggleSplitMode: () => set((s) => ({
+    splitMode: !s.splitMode,
+    splitActiveFile: !s.splitMode ? s.activeFile : null,
+  })),
 
   updateContent: (path, content) =>
     set((s) => ({

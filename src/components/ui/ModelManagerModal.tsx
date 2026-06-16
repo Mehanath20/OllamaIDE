@@ -1,8 +1,8 @@
 import { useState, KeyboardEvent } from "react";
-import { X, Search, Download, Cpu, CheckCircle2, Box, Database } from "lucide-react";
+import { X, Search, Download, Cpu, CheckCircle2, Box, Database, Trash2, RefreshCw } from "lucide-react";
 import { useUIStore } from "../../store/uiStore";
 import { useAIStore } from "../../store/aiStore";
-import { pullModel, listModels } from "../../lib/ollama";
+import { pullModel, listModels, deleteModel, cancelModelPull } from "../../lib/ollama";
 
 const RECOMMENDED_MODELS = [
   // Qwen Coding Series
@@ -37,6 +37,8 @@ export default function ModelManagerModal() {
     setActiveModel,
     isPulling,
     setIsPulling,
+    pullingModelName,
+    setPullingModelName,
     pullProgress,
     setPullProgress
   } = useAIStore() as any;
@@ -49,6 +51,7 @@ export default function ModelManagerModal() {
     if (!modelName.trim() || isPulling) return;
     
     setIsPulling(true);
+    setPullingModelName(modelName.trim());
     setPullProgress("Requesting pull...");
     
     try {
@@ -75,7 +78,18 @@ export default function ModelManagerModal() {
       alert(`Failed to pull model: ${err.message || err}`);
     } finally {
       setIsPulling(false);
+      setPullingModelName("");
       setPullProgress("");
+    }
+  };
+
+  const handleCancelPull = async () => {
+    if (pullingModelName) {
+      try {
+        await cancelModelPull(pullingModelName);
+      } catch (err) {
+        console.error("Cancel failed:", err);
+      }
     }
   };
 
@@ -95,6 +109,22 @@ export default function ModelManagerModal() {
     const actualModel = installedModels.find((m: string) => m === base || m === modelName);
     if (actualModel) {
       setActiveModel(actualModel);
+    }
+  };
+
+  const handleDelete = async (modelName: string) => {
+    if (!confirm(`Are you sure you want to delete ${modelName}?`)) return;
+    try {
+      await deleteModel(modelName);
+      const models = await listModels();
+      setInstalledModels(models);
+      if (activeModel === modelName && models.length > 0) {
+        setActiveModel(models[0]);
+      } else if (activeModel === modelName && models.length === 0) {
+        setActiveModel("");
+      }
+    } catch (err: any) {
+      alert(`Failed to delete model: ${err.message || err}`);
     }
   };
 
@@ -132,6 +162,13 @@ export default function ModelManagerModal() {
                   />
                 </div>
               </div>
+              <button 
+                className="pull-cancel-btn" 
+                onClick={handleCancelPull}
+                title="Cancel Download"
+              >
+                <X size={14} />
+              </button>
             </div>
           )}
 
@@ -195,12 +232,31 @@ export default function ModelManagerModal() {
 
                     <div className="model-actions">
                       {installed ? (
-                        <button 
-                          className={`btn-model-action ${isActive ? 'btn-active' : 'btn-select'}`}
-                          onClick={() => handleSetModel(m.name)}
-                        >
-                          {isActive ? "Active Model" : "Select Model"}
-                        </button>
+                        <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+                          <button 
+                            className={`btn-model-action ${isActive ? 'btn-active' : 'btn-select'}`}
+                            onClick={() => handleSetModel(m.name)}
+                            style={{ flex: 1 }}
+                          >
+                            {isActive ? "Active Model" : "Select Model"}
+                          </button>
+                          <button 
+                            className="btn-model-action btn-icon-only"
+                            onClick={() => handlePull(m.name)}
+                            title="Update Model"
+                            disabled={isPulling}
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                          <button 
+                            className="btn-model-action btn-icon-only btn-danger"
+                            onClick={() => handleDelete(m.name)}
+                            title="Delete Model"
+                            disabled={isPulling}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       ) : (
                         <button 
                           className="btn-model-action btn-download"
@@ -361,9 +417,25 @@ export default function ModelManagerModal() {
 
         .pull-bar-fill {
           height: 100%;
-          background: #a78bfa;
-          border-radius: 3px;
-          transition: width 0.2s ease-out;
+          background: #3b82f6;
+          border-radius: 4px;
+          transition: width 0.3s ease;
+        }
+        .pull-cancel-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          padding: 4px;
+          cursor: pointer;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: color 0.2s, background 0.2s;
+        }
+        .pull-cancel-btn:hover {
+          color: var(--error);
+          background: rgba(239, 68, 68, 0.1);
         }
 
         .section-title {

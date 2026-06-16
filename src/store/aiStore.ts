@@ -31,13 +31,18 @@ interface AIState {
   installedModels: string[];
   activeModel: string;
   completionModel: string;
+  activePersona: "Coder" | "Architect" | "Debugger" | "Reviewer" | "Documenter";
   isStreaming: boolean;
   ollamaOnline: boolean;
   ollamaVersion: string | null;
 
   // Model pulling state
   isPulling: boolean;
+  setIsPulling: (p: boolean) => void;
+  pullingModelName: string;
+  setPullingModelName: (name: string) => void;
   pullProgress: string;
+  setPullProgress: (s: string) => void;
 
   // Agent State
   agentMode: boolean;
@@ -57,11 +62,10 @@ interface AIState {
   setInstalledModels: (models: string[]) => void;
   setActiveModel: (model: string) => void;
   setCompletionModel: (model: string) => void;
+  setActivePersona: (persona: "Coder" | "Architect" | "Debugger" | "Reviewer" | "Documenter") => void;
   setStreaming: (v: boolean) => void;
   setOllamaOnline: (v: boolean) => void;
   setOllamaVersion: (v: string | null) => void;
-  setIsPulling: (v: boolean) => void;
-  setPullProgress: (v: string) => void;
 
   setAgentMode: (v: boolean) => void;
   setAgentAborted: (v: boolean) => void;
@@ -81,12 +85,17 @@ export const useAIStore = create<AIState>((set) => ({
   installedModels: [],
   activeModel: "qwen2.5-coder:14b",
   completionModel: "qwen2.5-coder:7b",
+  activePersona: "Coder",
   isStreaming: false,
   ollamaOnline: false,
   ollamaVersion: null,
 
   isPulling: false,
+  setIsPulling: (isPulling) => set({ isPulling }),
+  pullingModelName: "",
+  setPullingModelName: (pullingModelName) => set({ pullingModelName }),
   pullProgress: "",
+  setPullProgress: (pullProgress) => set({ pullProgress }),
 
   agentMode: false,
   agentAborted: false,
@@ -111,11 +120,10 @@ export const useAIStore = create<AIState>((set) => ({
   setInstalledModels: (installedModels) => set({ installedModels }),
   setActiveModel: (activeModel) => set({ activeModel }),
   setCompletionModel: (completionModel) => set({ completionModel }),
+  setActivePersona: (activePersona) => set({ activePersona }),
   setStreaming: (isStreaming) => set({ isStreaming }),
   setOllamaOnline: (ollamaOnline) => set({ ollamaOnline }),
   setOllamaVersion: (ollamaVersion) => set({ ollamaVersion }),
-  setIsPulling: (isPulling) => set({ isPulling }),
-  setPullProgress: (pullProgress) => set({ pullProgress }),
 
   setAgentMode: (agentMode) => set({ agentMode }),
   setAgentAborted: (agentAborted) => set({ agentAborted }),

@@ -2,18 +2,22 @@
    StatusBar.tsx — Live-wired status bar
    Shows: Git branch | errors | language | Ln/Col | encoding | Ollama status
    ============================================================ */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { GitBranch, AlertCircle, CheckCircle, Wifi, WifiOff } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../../store/editorStore";
 import { useAIStore } from "../../store/aiStore";
 import { useUIStore } from "../../store/uiStore";
+import { useFileStore } from "../../store/fileStore";
 
 export default function StatusBar() {
   const { openFiles, activeFile } = useEditorStore();
   const { ollamaOnline, activeModel, setOllamaOnline } = useAIStore();
+  const { workspaceRoot, gitRefreshTrigger } = useFileStore();
   const uiStore = useUIStore() as any;
   const cursorPosition = uiStore.cursorPosition as { line: number; column: number } | null;
+
+  const [currentBranch, setCurrentBranch] = useState("main");
 
   const activeFileData = openFiles.find((f) => f.path === activeFile);
 
@@ -32,6 +36,22 @@ export default function StatusBar() {
     return () => clearInterval(id);
   }, [setOllamaOnline]);
 
+  useEffect(() => {
+    const fetchBranch = async () => {
+      if (!workspaceRoot) {
+        setCurrentBranch("");
+        return;
+      }
+      try {
+        const branch = await invoke<string>("git_current_branch", { path: workspaceRoot });
+        setCurrentBranch(branch);
+      } catch (err) {
+        setCurrentBranch("");
+      }
+    };
+    fetchBranch();
+  }, [workspaceRoot, gitRefreshTrigger]);
+
   const language = activeFileData?.language || "plaintext";
   const line = cursorPosition?.line ?? 1;
   const col = cursorPosition?.column ?? 1;
@@ -40,10 +60,15 @@ export default function StatusBar() {
     <div className="statusbar">
       {/* Left section */}
       <div className="statusbar-left">
-        <span className="statusbar-item statusbar-item--accent">
-          <GitBranch size={11} />
-          main
-        </span>
+        {currentBranch && (
+          <span 
+            className="statusbar-item statusbar-item--accent statusbar-item--clickable"
+            onClick={() => uiStore.setBranchSelectorOpen(true)}
+          >
+            <GitBranch size={11} />
+            {currentBranch}
+          </span>
+        )}
         <span className="statusbar-item">
           <CheckCircle size={11} />
           0 errors

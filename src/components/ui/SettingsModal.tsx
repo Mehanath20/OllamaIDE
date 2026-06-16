@@ -1,4 +1,5 @@
-import { X, Monitor, Cpu, Paintbrush, FileCode } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, Monitor, Cpu, Paintbrush, FileCode, Save } from "lucide-react";
 import { useUIStore } from "../../store/uiStore";
 import { useAIStore } from "../../store/aiStore";
 
@@ -17,6 +18,31 @@ export default function SettingsModal() {
   } = useUIStore() as any;
 
   const { activeModel, setActiveModel, installedModels } = useAIStore() as any;
+
+  const [localTheme, setLocalTheme] = useState(theme);
+  const [localFontSize, setLocalFontSize] = useState(fontSize);
+  const [localTabSize, setLocalTabSize] = useState(tabSize);
+  const [localFormatOnSave, setLocalFormatOnSave] = useState(formatOnSave);
+  const [localActiveModel, setLocalActiveModel] = useState(activeModel);
+
+  useEffect(() => {
+    if (settingsOpen) {
+      setLocalTheme(theme);
+      setLocalFontSize(fontSize);
+      setLocalTabSize(tabSize);
+      setLocalFormatOnSave(formatOnSave);
+      setLocalActiveModel(activeModel);
+    }
+  }, [settingsOpen, theme, fontSize, tabSize, formatOnSave, activeModel]);
+
+  const handleSave = () => {
+    setTheme(localTheme);
+    setFontSize(localFontSize);
+    setTabSize(localTabSize);
+    setFormatOnSave(localFormatOnSave);
+    setActiveModel(localActiveModel);
+    setSettingsOpen(false);
+  };
 
   if (!settingsOpen) return null;
 
@@ -42,8 +68,8 @@ export default function SettingsModal() {
               <label className="settings-label">Default Model</label>
               <select 
                 className="settings-select" 
-                value={activeModel || ""} 
-                onChange={(e) => setActiveModel(e.target.value)}
+                value={localActiveModel || ""} 
+                onChange={(e) => setLocalActiveModel(e.target.value)}
               >
                 {installedModels.map((m: string) => (
                   <option key={m} value={m}>{m}</option>
@@ -68,8 +94,8 @@ export default function SettingsModal() {
               <label className="settings-label">Theme</label>
               <select 
                 className="settings-select" 
-                value={theme}
-                onChange={(e) => setTheme(e.target.value)}
+                value={localTheme}
+                onChange={(e) => setLocalTheme(e.target.value)}
               >
                 <option value="dark">Dark (Default)</option>
                 <option value="light">Light</option>
@@ -88,8 +114,8 @@ export default function SettingsModal() {
               <input 
                 type="number" 
                 className="settings-input" 
-                value={fontSize} 
-                onChange={(e) => setFontSize(parseInt(e.target.value) || 14)}
+                value={localFontSize} 
+                onChange={(e) => setLocalFontSize(parseInt(e.target.value) || 14)}
               />
             </div>
             <div className="settings-group">
@@ -97,23 +123,29 @@ export default function SettingsModal() {
               <input 
                 type="number" 
                 className="settings-input" 
-                value={tabSize} 
-                onChange={(e) => setTabSize(parseInt(e.target.value) || 2)}
+                value={localTabSize} 
+                onChange={(e) => setLocalTabSize(parseInt(e.target.value) || 2)}
               />
             </div>
             <div 
               className="settings-checkbox-group" 
-              onClick={() => setFormatOnSave(!formatOnSave)}
+              onClick={() => setLocalFormatOnSave(!localFormatOnSave)}
             >
               <input 
                 type="checkbox" 
                 id="format-save" 
-                checked={formatOnSave} 
+                checked={localFormatOnSave} 
                 readOnly
               />
               <label htmlFor="format-save" onClick={(e) => e.preventDefault()}>Format on Save</label>
             </div>
           </div>
+        </div>
+
+        <div className="settings-footer">
+          <button className="settings-save-btn" onClick={handleSave}>
+            <Save size={14} /> Save Changes
+          </button>
         </div>
       </div>
 
@@ -161,6 +193,37 @@ export default function SettingsModal() {
           padding: 20px 24px;
           border-bottom: 1px solid rgba(255, 255, 255, 0.05);
           background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
+        }
+        
+        .settings-footer {
+          display: flex;
+          justify-content: flex-end;
+          padding: 16px 24px;
+          border-top: 1px solid rgba(255, 255, 255, 0.05);
+          background: rgba(0, 0, 0, 0.2);
+        }
+
+        .settings-save-btn {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: var(--accent);
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 8px;
+          font-weight: 600;
+          font-size: 13px;
+          cursor: pointer;
+          transition: background 0.2s, transform 0.1s;
+        }
+
+        .settings-save-btn:hover {
+          background: #8b5cf6;
+        }
+
+        .settings-save-btn:active {
+          transform: scale(0.98);
         }
 
         .settings-title {

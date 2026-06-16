@@ -41,6 +41,8 @@ export default function AIPanel() {
     setOllamaVersion,
     setInstalledModels,
     setActiveModel,
+    activePersona,
+    setActivePersona,
     clearMessages,
   } = useAIStore();
   const { setModelLibraryOpen } = useUIStore() as any;
@@ -174,7 +176,19 @@ export default function AIPanel() {
       {/* Header section with Model Selection */}
       <div className="ai-header">
         <div className="ai-header-left">
-          <span className="ai-header-title">✦ AI AGENT</span>
+          <span className="ai-header-title">✦ AI</span>
+          <select 
+            className="persona-select" 
+            value={activePersona} 
+            onChange={(e) => setActivePersona(e.target.value as any)}
+            title="Select AI Persona"
+          >
+            <option value="Coder">Coder</option>
+            <option value="Architect">Architect</option>
+            <option value="Debugger">Debugger</option>
+            <option value="Reviewer">Reviewer</option>
+            <option value="Documenter">Documenter</option>
+          </select>
         </div>
         <div className="ai-header-right">
           {ollamaOnline && (
@@ -406,6 +420,23 @@ export default function AIPanel() {
           font-weight: 700;
           color: var(--accent);
           letter-spacing: 0.12em;
+        }
+
+        .persona-select {
+          background: transparent;
+          border: 1px solid var(--border-soft);
+          border-radius: 4px;
+          color: var(--text-primary);
+          font-size: 11px;
+          font-weight: 600;
+          padding: 2px 4px;
+          cursor: pointer;
+          outline: none;
+        }
+
+        .persona-select option {
+          background: var(--bg-2);
+          color: var(--text-primary);
         }
 
         .model-dropdown-container {

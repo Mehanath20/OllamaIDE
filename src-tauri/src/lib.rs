@@ -11,6 +11,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState::default())
+        .manage(commands::dap::DapState::new())
+        .manage(commands::ollama::OllamaState::new())
         .invoke_handler(tauri::generate_handler![
             // Filesystem
             commands::fs::read_file,
@@ -32,6 +34,17 @@ pub fn run() {
             commands::git::git_config,
             commands::git::git_push,
             commands::git::git_pull,
+            commands::git::git_clone,
+            commands::git::git_fetch,
+            commands::git::git_checkout,
+            commands::git::git_branch_create,
+            commands::git::git_branch_list,
+            commands::git::git_merge,
+            commands::git::git_stash,
+            commands::git::git_log,
+            commands::git::git_diff,
+            commands::git::git_current_branch,
+            commands::git::git_show_head,
             commands::process::execute_shell,
             // Terminal — Phase 3 (new API)
             commands::terminal::create_terminal,
@@ -45,11 +58,17 @@ pub fn run() {
             commands::terminal::kill_pty,
             // AI
             commands::ollama::check_ollama_health,
-            commands::ollama::list_models,
             commands::ollama::start_ollama,
+            commands::ollama::list_models,
             commands::ollama::pull_model,
+            commands::ollama::cancel_pull_model,
+            commands::ollama::delete_model,
             commands::ollama::chat_ollama,
             commands::ollama::generate_completion,
+            // DAP
+            commands::dap::start_debug_session,
+            commands::dap::send_dap_message,
+            commands::dap::stop_debug_session,
         ])
         .setup(|_app| {
             Ok(())

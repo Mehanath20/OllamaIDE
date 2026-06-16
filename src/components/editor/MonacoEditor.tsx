@@ -11,6 +11,7 @@ import type * as Monaco from "monaco-editor";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../../store/editorStore";
 import { useUIStore } from "../../store/uiStore";
+import { useFileStore } from "../../store/fileStore";
 import { save } from "@tauri-apps/plugin-dialog";
 import { getLanguageFromExt } from "../../lib/fileIcons";
 
@@ -231,9 +232,31 @@ export default function MonacoEditor({ path, content, language }: Props) {
     editor.focus();
   };
 
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleChange = (value: string | undefined) => {
     if (value !== undefined) {
       updateContent(path, value);
+
+      // Auto-save logic
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      
+      saveTimeoutRef.current = setTimeout(async () => {
+        const storePath = useEditorStore.getState().activeFile ?? path;
+        // Do not auto-save untitled files
+        if (!storePath.startsWith("Untitled-")) {
+          try {
+            await invoke("write_file", { path: storePath, content: value });
+            useEditorStore.getState().markSaved(storePath);
+            // Also trigger git refresh so git panel updates instantly
+            useFileStore.getState().triggerGitRefresh();
+          } catch (err) {
+            console.error("Auto-save failed:", err);
+          }
+        }
+      }, 1000); // 1 second debounce
     }
   };
 

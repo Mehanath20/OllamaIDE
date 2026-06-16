@@ -1,6 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use std::collections::HashMap;
+
+pub struct OllamaState {
+    pub active_pulls: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+impl OllamaState {
+    pub fn new() -> Self {
+        Self {
+            active_pulls: Mutex::new(HashMap::new()),
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub struct OllamaHealth {
@@ -146,10 +162,22 @@ pub async fn pull_model(
         return Err(format!("Pull failed: {}", err_text));
     }
 
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    {
+        let state = app.state::<OllamaState>();
+        let mut pulls = state.active_pulls.lock().await;
+        pulls.insert(model.clone(), Arc::clone(&cancel_flag));
+    }
+
     let mut buffer = Vec::new();
     let mut last_error = None;
+    let mut cancelled = false;
 
     while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
+        if cancel_flag.load(Ordering::Relaxed) {
+            cancelled = true;
+            break;
+        }
         buffer.extend_from_slice(&chunk);
         while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
             let line_bytes = buffer.drain(..=pos).collect::<Vec<u8>>();
@@ -184,9 +212,63 @@ pub async fn pull_model(
             }
         }
     }
+    {
+        let state = app.state::<OllamaState>();
+        let mut pulls = state.active_pulls.lock().await;
+        pulls.remove(&model);
+    }
+
+    if cancelled {
+        let _ = app.emit(
+            "ollama-pull-progress",
+            PullProgressPayload {
+                model: model.clone(),
+                status: "cancelled".to_string(),
+                completed: Some(0),
+                total: Some(100),
+                done: true,
+                error: Some("Download cancelled by user".to_string()),
+            },
+        );
+        return Err("Cancelled by user".to_string());
+    }
 
     if let Some(err) = last_error {
         return Err(format!("Ollama error: {}", err));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cancel_pull_model(app: AppHandle, model: String) -> Result<(), String> {
+    let state = app.state::<OllamaState>();
+    let pulls = state.active_pulls.lock().await;
+    if let Some(flag) = pulls.get(&model) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_model(model: String) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "name": model
+    });
+
+    let req = reqwest::Request::new(reqwest::Method::DELETE, reqwest::Url::parse("http://localhost:11434/api/delete").unwrap());
+    
+    // reqwest doesn't easily let you add body to DELETE via method, so:
+    let res = client.request(reqwest::Method::DELETE, "http://localhost:11434/api/delete")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Delete failed: {}", err_text));
     }
 
     Ok(())

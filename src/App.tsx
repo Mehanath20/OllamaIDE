@@ -19,6 +19,7 @@ import { useUIStore } from "./store/uiStore";
 import { useInlineCompletions } from "./components/ai/InlineSuggest";
 import DiffReview from "./components/ai/DiffReview";
 import AIPanel from "./components/ai/AIPanel";
+import BranchSelector from "./components/ui/BranchSelector";
 
 export default function App() {
   useInlineCompletions();
@@ -166,6 +167,7 @@ export default function App() {
       <SettingsModal />
       <AboutModal />
       <ModelManagerModal />
+      <BranchSelector />
 
       <style>{`
         .app-shell {

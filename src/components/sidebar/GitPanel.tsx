@@ -20,6 +20,9 @@ export default function GitPanel() {
   const [gitName, setGitName] = useState("");
   const [gitEmail, setGitEmail] = useState("");
 
+  const [view, setView] = useState<"changes" | "history">("changes");
+  const [commits, setCommits] = useState<any[]>([]);
+
   const fetchStatus = async () => {
     if (!workspaceRoot) return;
     setLoading(true);
@@ -27,6 +30,14 @@ export default function GitPanel() {
     try {
       const res = await invoke<GitFileStatus[]>("git_status", { path: workspaceRoot });
       setChanges(res);
+      
+      try {
+        const history = await invoke<any[]>("git_log", { path: workspaceRoot, limit: 50 });
+        setCommits(history);
+      } catch (e) {
+        // Log might fail if no commits yet
+        setCommits([]);
+      }
     } catch (err: any) {
       setError("Not a git repository or git not installed.");
     } finally {
@@ -48,18 +59,34 @@ export default function GitPanel() {
     if (!workspaceRoot) return;
     try {
       const fullPath = `${workspaceRoot}/${file}`;
-      const content = await invoke<string>("read_file", { path: fullPath });
+      
+      let content = "";
+      try {
+        content = await invoke<string>("read_file", { path: fullPath });
+      } catch (e) {
+        // File might be deleted
+      }
+
+      let originalContent = "";
+      try {
+        originalContent = await invoke<string>("git_show_head", { path: workspaceRoot, file });
+      } catch (e) {
+        // Ignored
+      }
+
       const name = file.split(/[\\/]/).pop() || file;
       const ext = name.split(".").pop() || "";
       openFile({
-        path: fullPath,
-        name,
+        path: fullPath + "?diff=true", // distinguish from normal file opening
+        name: `(Diff) ${name}`,
         content,
+        originalContent,
+        isDiff: true,
         language: ext === "ts" || ext === "tsx" ? "typescript" : ext === "js" || ext === "jsx" ? "javascript" : ext,
         isDirty: false,
       });
     } catch (err) {
-      console.error("Failed to open file:", err);
+      console.error("Failed to open file diff:", err);
     }
   };
 
@@ -96,6 +123,34 @@ export default function GitPanel() {
       fetchStatus();
     } catch (err: any) {
       alert("Pull failed: " + err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFetch = async () => {
+    if (!workspaceRoot) return;
+    setLoading(true);
+    try {
+      await invoke("git_fetch", { path: workspaceRoot });
+      alert("Fetched successfully!");
+      fetchStatus();
+    } catch (err: any) {
+      alert("Fetch failed: " + err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStash = async () => {
+    if (!workspaceRoot) return;
+    setLoading(true);
+    try {
+      await invoke("git_stash", { path: workspaceRoot, action: "push" });
+      alert("Stashed successfully!");
+      fetchStatus();
+    } catch (err: any) {
+      alert("Stash failed: " + err);
     } finally {
       setLoading(false);
     }
@@ -159,11 +214,31 @@ export default function GitPanel() {
       <div className="panel-header-row">
         <span className="panel-header">SOURCE CONTROL</span>
         <div style={{ display: "flex", gap: "4px" }}>
-          <button className="btn-icon" onClick={handlePull} title="Pull" disabled={loading}>
+          <button 
+            className={`btn-icon ${view === 'changes' ? 'active' : ''}`} 
+            onClick={() => setView('changes')} 
+            title="Changes"
+          >
+            <GitBranch size={12} />
+          </button>
+          <button 
+            className={`btn-icon ${view === 'history' ? 'active' : ''}`} 
+            onClick={() => setView('history')} 
+            title="Commit History"
+          >
+            <RefreshCw size={12} />
+          </button>
+          <button className="btn-icon" onClick={handleFetch} title="Fetch" disabled={loading}>
             <ArrowDown size={12} />
           </button>
+          <button className="btn-icon" onClick={handlePull} title="Pull" disabled={loading}>
+            <ArrowDown size={12} style={{ strokeWidth: 3 }} />
+          </button>
           <button className="btn-icon" onClick={handlePush} title="Push" disabled={loading}>
-            <ArrowUp size={12} />
+            <ArrowUp size={12} style={{ strokeWidth: 3 }} />
+          </button>
+          <button className="btn-icon" onClick={handleStash} title="Stash" disabled={loading}>
+            <FilePlus size={12} />
           </button>
           <button className="btn-icon" onClick={() => setShowConfig(!showConfig)} title="Configure Git">
             <Settings size={12} />
@@ -205,74 +280,99 @@ export default function GitPanel() {
         </div>
       ) : (
         <>
-          <div className="git-commit-box">
-            <textarea 
-              className="commit-input" 
-              placeholder="Message (Ctrl+Enter to commit)" 
-              rows={3}
-              value={commitMessage}
-              onChange={(e) => setCommitMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && e.ctrlKey) {
-                  e.preventDefault();
-                  handleCommit();
-                }
-              }}
-            />
-            <button className="btn-commit" onClick={handleCommit}>
-              <Check size={14} /> Commit
-            </button>
-          </div>
-          
-          <div className="git-changes">
-            {stagedChanges.length > 0 && (
-              <div className="changes-section">
-                <div className="changes-header" style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span>Staged Changes ({stagedChanges.length})</span>
-                  <button className="btn-icon stage-btn" onClick={(e) => handleUnstage(".", e)} title="Unstage all changes">
-                    <FileMinus size={12} />
-                  </button>
-                </div>
-                <div className="changes-list">
-                  {stagedChanges.map((item, i) => (
-                    <div key={i} className="git-file-item" onClick={() => handleFileClick(item.file)}>
-                      {getStatusIcon(item.status)}
-                      <span className="git-file-name truncate">{item.file}</span>
-                      <button className="btn-icon stage-btn" onClick={(e) => handleUnstage(item.file, e)} title="Unstage changes">
+          {view === "changes" && (
+            <>
+              <div className="git-commit-box">
+                <textarea 
+                  className="commit-input" 
+                  placeholder="Message (Ctrl+Enter to commit)" 
+                  rows={3}
+                  value={commitMessage}
+                  onChange={(e) => setCommitMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.ctrlKey) {
+                      e.preventDefault();
+                      handleCommit();
+                    }
+                  }}
+                />
+                <button className="btn-commit" onClick={handleCommit}>
+                  <Check size={14} /> Commit
+                </button>
+              </div>
+              
+              <div className="git-changes">
+                {stagedChanges.length > 0 && (
+                  <div className="changes-section">
+                    <div className="changes-header" style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span>Staged Changes ({stagedChanges.length})</span>
+                      <button className="btn-icon stage-btn" onClick={(e) => handleUnstage(".", e)} title="Unstage all changes">
                         <FileMinus size={12} />
                       </button>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            <div className="changes-section">
-              <div className="changes-header" style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>Changes ({unstagedChanges.length})</span>
-                {unstagedChanges.length > 0 && (
-                  <button className="btn-icon stage-btn" onClick={(e) => handleStage(".", e)} title="Stage all changes">
-                    <Plus size={12} />
-                  </button>
+                    <div className="changes-list">
+                      {stagedChanges.map((item, i) => (
+                        <div key={i} className="git-file-item" onClick={() => handleFileClick(item.file)}>
+                          {getStatusIcon(item.status)}
+                          <span className="git-file-name truncate">{item.file}</span>
+                          <button className="btn-icon stage-btn" onClick={(e) => handleUnstage(item.file, e)} title="Unstage changes">
+                            <FileMinus size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </div>
-              <div className="changes-list">
-                {unstagedChanges.length === 0 ? (
-                  <div className="git-empty" style={{ padding: "10px", fontSize: "10px" }}>No unstaged changes</div>
-                ) : (
-                  unstagedChanges.map((item, i) => (
-                    <div key={i} className="git-file-item" onClick={() => handleFileClick(item.file)}>
-                      {getStatusIcon(item.status)}
-                      <span className="git-file-name truncate">{item.file}</span>
-                      <button className="btn-icon stage-btn" onClick={(e) => handleStage(item.file, e)} title="Stage changes">
+                
+                <div className="changes-section">
+                  <div className="changes-header" style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>Changes ({unstagedChanges.length})</span>
+                    {unstagedChanges.length > 0 && (
+                      <button className="btn-icon stage-btn" onClick={(e) => handleStage(".", e)} title="Stage all changes">
                         <Plus size={12} />
                       </button>
-                    </div>
-                  ))
-                )}
+                    )}
+                  </div>
+                  <div className="changes-list">
+                    {unstagedChanges.length === 0 ? (
+                      <div className="git-empty" style={{ padding: "10px", fontSize: "10px" }}>No unstaged changes</div>
+                    ) : (
+                      unstagedChanges.map((item, i) => (
+                        <div key={i} className="git-file-item" onClick={() => handleFileClick(item.file)}>
+                          {getStatusIcon(item.status)}
+                          <span className="git-file-name truncate">{item.file}</span>
+                          <button className="btn-icon stage-btn" onClick={(e) => handleStage(item.file, e)} title="Stage changes">
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
+            </>
+          )}
+
+          {view === "history" && (
+            <div className="git-history">
+              {commits.length === 0 ? (
+                <div className="git-empty">No commit history</div>
+              ) : (
+                commits.map((commit, i) => (
+                  <div key={i} className="commit-item">
+                    <div className="commit-header">
+                      <span className="commit-msg">{commit.message}</span>
+                    </div>
+                    <div className="commit-meta">
+                      <span className="commit-author">{commit.author}</span>
+                      <span className="commit-date">{commit.date}</span>
+                      <span className="commit-hash">{commit.hash.substring(0, 7)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
-          </div>
+          )}
         </>
       )}
 
@@ -309,6 +409,10 @@ export default function GitPanel() {
         .btn-icon:hover {
           color: var(--text-primary);
           background: var(--bg-3);
+        }
+        .btn-icon.active {
+          color: var(--accent);
+          background: rgba(167, 139, 250, 0.15);
         }
         .spin {
           animation: spin 1s linear infinite;
@@ -375,10 +479,37 @@ export default function GitPanel() {
           opacity: 0.9;
         }
 
-        .git-changes {
+        .git-changes, .git-history {
           flex: 1;
           overflow-y: auto;
         }
+        
+        .git-history {
+          padding: 8px 0;
+        }
+        .commit-item {
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--border-soft);
+        }
+        .commit-header {
+          margin-bottom: 4px;
+        }
+        .commit-msg {
+          font-size: 12px;
+          color: var(--text-primary);
+          font-weight: 500;
+        }
+        .commit-meta {
+          display: flex;
+          gap: 8px;
+          font-size: 10px;
+          color: var(--text-muted);
+        }
+        .commit-hash {
+          font-family: var(--font-mono);
+          margin-left: auto;
+        }
+
         .changes-section {
           display: flex;
           flex-direction: column;
