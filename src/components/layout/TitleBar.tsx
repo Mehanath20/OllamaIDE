@@ -506,7 +506,7 @@ export default function TitleBar() {
     <div className="titlebar" data-tauri-drag-region>
       <div className="titlebar-left" data-tauri-drag-region>
         <span className="titlebar-logo">
-          <Plane size={16} color="var(--accent)" />
+          <img src="/icon.png" width={16} height={16} alt="Logo" style={{ borderRadius: '2px', objectFit: 'cover' }} />
         </span>
         <span className="titlebar-name">AntiNetwork</span>
       </div>

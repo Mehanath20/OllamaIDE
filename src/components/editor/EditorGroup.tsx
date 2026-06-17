@@ -208,7 +208,7 @@ function WelcomeScreen() {
     <div className="welcome">
       <div className="welcome-content">
         <div className="welcome-logo" style={{ color: "var(--accent)" }}>
-          <Plane size={72} strokeWidth={1} />
+          <img src="/icon.png" width={72} height={72} alt="Logo" style={{ borderRadius: '12px', objectFit: 'cover' }} />
         </div>
         {/* AntiNetwork branding watermark */}
         <h1 className="welcome-title">AntiNetwork</h1>

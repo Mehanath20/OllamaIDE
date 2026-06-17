@@ -5,6 +5,9 @@ import { useAIStore } from "../../store/aiStore";
 import { pullModel, listModels, deleteModel, cancelModelPull } from "../../lib/ollama";
 
 const RECOMMENDED_MODELS = [
+  // Qwen 3 Series (Latest)
+  { name: "qwen3:14b", size: "9.0 GB", params: "14B", desc: "The next generation Qwen model. Excellent reasoning." },
+  { name: "qwen3:72b", size: "43.0 GB", params: "72B", desc: "Ultimate Qwen 3 model. Extreme hardware required." },
   // Qwen Coding Series
   { name: "qwen2.5-coder:7b", size: "4.7 GB", params: "7B", desc: "Fast & capable coding assistant. Good for laptops." },
   { name: "qwen2.5-coder:14b", size: "9.0 GB", params: "14B", desc: "Excellent balance of speed and advanced coding logic." },
@@ -30,8 +33,8 @@ const RECOMMENDED_MODELS = [
 
 export default function ModelManagerModal() {
   const { modelLibraryOpen, setModelLibraryOpen } = useUIStore() as any;
-  const { 
-    installedModels, 
+  const {
+    installedModels,
     setInstalledModels,
     activeModel,
     setActiveModel,
@@ -49,21 +52,21 @@ export default function ModelManagerModal() {
 
   const handlePull = async (modelName: string) => {
     if (!modelName.trim() || isPulling) return;
-    
+
     setIsPulling(true);
     setPullingModelName(modelName.trim());
     setPullProgress("Requesting pull...");
-    
+
     try {
       await pullModel(modelName.trim(), (p: any) => {
         if (p.completed && p.total) {
           const percent = ((p.completed / p.total) * 100).toFixed(1);
-          setPullProgress(`Downloading: ${percent}% (${(p.completed/1e9).toFixed(1)} GB / ${(p.total/1e9).toFixed(1)} GB)`);
+          setPullProgress(`Downloading: ${percent}% (${(p.completed / 1e9).toFixed(1)} GB / ${(p.total / 1e9).toFixed(1)} GB)`);
         } else {
           setPullProgress(p.status || "Downloading...");
         }
       });
-      
+
       // Refresh models
       const models = await listModels();
       let pulledModel = models.find((m: string) => m === modelName.trim() || m.startsWith(modelName.trim() + ":"));
@@ -73,7 +76,7 @@ export default function ModelManagerModal() {
       }
       setInstalledModels(models);
       setActiveModel(pulledModel);
-      
+
     } catch (err: any) {
       alert(`Failed to pull model: ${err.message || err}`);
     } finally {
@@ -131,7 +134,7 @@ export default function ModelManagerModal() {
   return (
     <div className="settings-overlay" onClick={() => setModelLibraryOpen(false)}>
       <div className="model-modal" onClick={(e) => e.stopPropagation()}>
-        
+
         {/* Header */}
         <div className="model-header">
           <div className="model-title">
@@ -152,18 +155,18 @@ export default function ModelManagerModal() {
               <div className="pull-info">
                 <span className="pull-text">{pullProgress}</span>
                 <div className="pull-bar-bg">
-                  <div 
-                    className="pull-bar-fill" 
-                    style={{ 
-                      width: pullProgress.includes('%') 
-                        ? `${pullProgress.split('%')[0].split(': ')[1]}%` 
-                        : '100%' 
-                    }} 
+                  <div
+                    className="pull-bar-fill"
+                    style={{
+                      width: pullProgress.includes('%')
+                        ? `${pullProgress.split('%')[0].split(': ')[1]}%`
+                        : '100%'
+                    }}
                   />
                 </div>
               </div>
-              <button 
-                className="pull-cancel-btn" 
+              <button
+                className="pull-cancel-btn"
                 onClick={handleCancelPull}
                 title="Cancel Download"
               >
@@ -177,8 +180,8 @@ export default function ModelManagerModal() {
             <h3 className="section-title">Pull Custom Model</h3>
             <div className="search-bar-wrapper">
               <Search size={16} className="search-icon" />
-              <input 
-                type="text" 
+              <input
+                type="text"
                 className="search-input"
                 placeholder="Enter model tag from ollama.com (e.g. qwen2.5-coder:1.5b)"
                 value={searchInput}
@@ -186,7 +189,7 @@ export default function ModelManagerModal() {
                 onKeyDown={handleKeyDown}
                 disabled={isPulling}
               />
-              <button 
+              <button
                 className="btn-pull-custom"
                 onClick={() => handlePull(searchInput)}
                 disabled={!searchInput.trim() || isPulling}
@@ -201,12 +204,12 @@ export default function ModelManagerModal() {
           {/* Recommended Models Grid */}
           <div className="model-list-section">
             <h3 className="section-title">Recommended Models</h3>
-            
+
             <div className="model-grid">
               {RECOMMENDED_MODELS.map((m) => {
                 const installed = isModelInstalled(m.name);
                 const isActive = activeModel === m.name || activeModel === `${m.name}:latest`;
-                
+
                 return (
                   <div key={m.name} className={`model-card ${installed ? 'installed' : ''} ${isActive ? 'active' : ''}`}>
                     <div className="model-card-header">
@@ -222,9 +225,9 @@ export default function ModelManagerModal() {
                         <div className="status-badge not-installed">Cloud</div>
                       )}
                     </div>
-                    
+
                     <p className="model-desc">{m.desc}</p>
-                    
+
                     <div className="model-meta">
                       <span className="meta-item"><Database size={12} /> {m.params}</span>
                       <span className="meta-item">{m.size}</span>
@@ -233,14 +236,14 @@ export default function ModelManagerModal() {
                     <div className="model-actions">
                       {installed ? (
                         <div style={{ display: "flex", gap: "8px", width: "100%" }}>
-                          <button 
+                          <button
                             className={`btn-model-action ${isActive ? 'btn-active' : 'btn-select'}`}
                             onClick={() => handleSetModel(m.name)}
                             style={{ flex: 1 }}
                           >
                             {isActive ? "Active Model" : "Select Model"}
                           </button>
-                          <button 
+                          <button
                             className="btn-model-action btn-icon-only"
                             onClick={() => handlePull(m.name)}
                             title="Update Model"
@@ -248,7 +251,7 @@ export default function ModelManagerModal() {
                           >
                             <RefreshCw size={14} />
                           </button>
-                          <button 
+                          <button
                             className="btn-model-action btn-icon-only btn-danger"
                             onClick={() => handleDelete(m.name)}
                             title="Delete Model"
@@ -258,7 +261,7 @@ export default function ModelManagerModal() {
                           </button>
                         </div>
                       ) : (
-                        <button 
+                        <button
                           className="btn-model-action btn-download"
                           onClick={() => handlePull(m.name)}
                           disabled={isPulling}
