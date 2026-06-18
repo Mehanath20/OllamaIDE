@@ -196,12 +196,12 @@ const DOCUMENTER_RULES = BASE_RULES + `
 
 function getSystemPrompt(persona: string): string {
   switch (persona) {
-    case "Architect":  return ARCHITECT_RULES;
-    case "Debugger":   return DEBUGGER_RULES;
-    case "Reviewer":   return REVIEWER_RULES;
+    case "Architect": return ARCHITECT_RULES;
+    case "Debugger": return DEBUGGER_RULES;
+    case "Reviewer": return REVIEWER_RULES;
     case "Documenter": return DOCUMENTER_RULES;
-    case "Planner":    return PLANNER_RULES;
-    default:           return CODER_RULES;
+    case "Planner": return PLANNER_RULES;
+    default: return CODER_RULES;
   }
 }
 
@@ -233,7 +233,7 @@ function extractFilePath(openTag: string, content: string): string {
   for (const line of content.split("\n").slice(0, 3)) {
     const t = line.trim();
     if (t && t.includes(".") && !t.includes(" ") && !t.startsWith("<") &&
-        /\.(html|css|js|ts|json|md|txt|jsx|tsx|py|rs|go|java|php|rb|sql|yaml|yml|toml|sh|xml|svg)$/i.test(t)) {
+      /\.(html|css|js|ts|json|md|txt|jsx|tsx|py|rs|go|java|php|rb|sql|yaml|yml|toml|sh|xml|svg)$/i.test(t)) {
       return t;
     }
   }
@@ -306,7 +306,7 @@ async function refreshFileTree(root: string): Promise<void> {
     useFileStore.getState().setTree(entries.map(e => ({
       name: e.name, path: e.path, isDir: e.is_dir, size: e.size, children: undefined, expanded: false,
     })));
-  } catch {}
+  } catch { }
 }
 
 const LANG_MAP: Record<string, string> = {
@@ -436,7 +436,7 @@ export async function runAgentTurn(
   const sessionId = `agent-${Date.now()}`;
 
   if (userQuery) {
-      autoTurnCount = 0;
+    autoTurnCount = 0;
     aiStore.clearAgentState();
     aiStore.setAgentAborted(false);
     // Reset per-task state
@@ -450,8 +450,10 @@ export async function runAgentTurn(
   if (autoTurnCount > MAX_AUTO_TURNS) {
     aiStore.setAgentStatus("idle");
     aiStore.addAgentLog(`⚠ Max turns (${MAX_AUTO_TURNS}) reached. Stopping.`);
-    aiStore.addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[system]: Agent stopped after ${MAX_AUTO_TURNS} turns. Ask it to continue if needed.` });
+    aiStore.addMessage({
+      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+      content: `[system]: Agent stopped after ${MAX_AUTO_TURNS} turns. Ask it to continue if needed.`
+    });
     return;
   }
 
@@ -496,8 +498,10 @@ export async function runAgentTurn(
   if (last?.role === "assistant") {
     const pending = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
     if (pending.length > 0) {
-      payload.push({ role: "user",
-        content: `Write the next file now: "${pending[0].text}". Use <write_file path="${pending[0].text}"> with 100% complete content.` });
+      payload.push({
+        role: "user",
+        content: `Write the next file now: "${pending[0].text}". Use <write_file path="${pending[0].text}"> with 100% complete content.`
+      });
     } else {
       payload.push({ role: "user", content: `All files written. Output <done>summary</done> now.` });
     }
@@ -537,19 +541,19 @@ async function handleCompletedTurn(content: string): Promise<void> {
   const steps = parsePlan(content);
   if (steps.length > 0) aiStore.setAgentSteps(steps);
 
-  const writeRx  = /<write_file\b([^>]*)>([\s\S]*?)<\/write_file>/i;
-  const readRx   = /<read_file\b([^>]*)\/>/i;
-  const runRx    = /<run_command>([\s\S]*?)<\/run_command>/i;
-  const listRx   = /<list_dir\b([^>]*)\/>/i;
+  const writeRx = /<write_file\b([^>]*)>([\s\S]*?)<\/write_file>/i;
+  const readRx = /<read_file\b([^>]*)\/>/i;
+  const runRx = /<run_command>([\s\S]*?)<\/run_command>/i;
+  const listRx = /<list_dir\b([^>]*)\/>/i;
   const searchRx = /<search_files\b([^>]*)\/>/i;
-  const doneRx   = /<done>([\s\S]*?)<\/done>/i;
+  const doneRx = /<done>([\s\S]*?)<\/done>/i;
 
-  let writeM  = content.match(writeRx);
-  const readM   = content.match(readRx);
-  const runM    = content.match(runRx);
-  const listM   = content.match(listRx);
+  let writeM = content.match(writeRx);
+  const readM = content.match(readRx);
+  const runM = content.match(runRx);
+  const listM = content.match(listRx);
   const searchM = content.match(searchRx);
-  const doneM   = content.match(doneRx);
+  const doneM = content.match(doneRx);
 
   const attr = (attrs: string, name: string): string | null => {
     const m = attrs.match(new RegExp(`\\b${name}\\s*=\\s*["']?([^"'\\s>]+)["']?`, "i"));
@@ -591,7 +595,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
 
   // ── MULTI-TURN CONTINUATION HANDLING ────────────────────────────────────────
   const truncatedFile = aiStore.truncatedFile;
-  
+
   if (truncatedFile) {
     // We are currently in the middle of a multi-turn file generation.
     // The current content is just a continuation of the previous cut-off content.
@@ -600,8 +604,27 @@ async function handleCompletedTurn(content: string): Promise<void> {
       .replace(/^\s*(Sure, here is the continuation|Continuing|Here is the rest|.*previous response got cut off.*).*?\n/i, "") // Strip conversational filler
       .replace(/^\s*```[a-z]*\n?/i, "")
       .replace(/\n?```\s*$/i, "");
-      
-    const appendedContent = truncatedFile.contentSoFar + cleanContent;
+
+    let appendedContent = truncatedFile.contentSoFar;
+    
+    // Check for overlap to prevent snippet duplication (in case the model repeated the end of the previous chunk)
+    let overlapFound = false;
+    for (let len = Math.min(appendedContent.length, cleanContent.length, 500); len > 0; len--) {
+      if (appendedContent.endsWith(cleanContent.substring(0, len))) {
+        appendedContent += cleanContent.substring(len);
+        overlapFound = true;
+        break;
+      }
+    }
+    if (!overlapFound) {
+      appendedContent += cleanContent;
+    }
+
+    // Auto-close if the continuation is short (meaning the model likely finished the file but forgot to close the tag)
+    if (!appendedContent.includes("</write_file>") && cleanContent.trim().length < 500) {
+      useAIStore.getState().addAgentLog("⚠️ Continuation was short and tag unclosed. Auto-closing file.");
+      appendedContent += "\n</write_file>";
+    }
 
     // Check if the model FINALLY closed the tag
     if (appendedContent.includes("</write_file>")) {
@@ -609,7 +632,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
       aiStore.addAgentLog("✓ Truncated file completed.");
       // Clear the truncated state immediately so it doesn't loop
       aiStore.setTruncatedFile(null);
-      
+
       const openTagMatch = appendedContent.match(/<write_file\b([^>]*)>([\s\S]*?)<\/write_file>/i);
       if (openTagMatch) {
         writeM = openTagMatch;
@@ -618,11 +641,12 @@ async function handleCompletedTurn(content: string): Promise<void> {
       // Still truncated! Hit max tokens again.
       aiStore.addAgentLog("⚠️ Still truncated. Requesting another continuation...");
       aiStore.setTruncatedFile({ path: truncatedFile.path, contentSoFar: appendedContent });
-      
-      const snippet = appendedContent.slice(-150);
+
       aiStore.addMessage({
         id: `sys-${Date.now()}`, role: "user", timestamp: Date.now(),
-        content: `Your response hit the limit again. Please continue writing the code exactly from this snippet:\n\`\`\`\n${snippet}\n\`\`\`\nDO NOT output the snippet itself. Just output the exact next characters that follow it. Do not include any markdown backticks or conversational text.`,
+        content: `Your response hit the limit again. Please continue writing the code exactly from where you left off.\n` +
+          `Do NOT repeat any code you already wrote. Start your response with the exact next character.\n` +
+          `Do NOT include any conversational text or markdown code fences.`,
       });
       setTimeout(() => runAgentTurn(null), 500);
       return;
@@ -639,23 +663,22 @@ async function handleCompletedTurn(content: string): Promise<void> {
     const openTagMatch = content.match(/<write_file\b([^>]*)>([\s\S]*)$/i);
     if (openTagMatch && !content.includes("</write_file>")) {
       let targetPath = extractFilePath(`<write_file ${openTagMatch[1]}>`, "").replace(/^\/+/, "");
-      
+
       // Save the state into the store so the NEXT turn knows to append
       aiStore.setTruncatedFile({
         path: targetPath,
         contentSoFar: openTagMatch[0] // this includes the tag and the partial content
       });
-      
+
       aiStore.addAgentLog(`⚠️ Token limit hit. Saving partial file: ${targetPath}`);
-      
+
       // We don't synthesize a match here anymore because we don't want to save a broken file.
       // We just ask for the continuation right away.
-      const snippet = openTagMatch[0].slice(-150);
       aiStore.addMessage({
         id: `sys-${Date.now()}`, role: "user", timestamp: Date.now(),
-        content: `Your last response hit the maximum length limit before finishing "${targetPath}".\n` +
-          `Please continue writing the code exactly from this snippet:\n\`\`\`\n${snippet}\n\`\`\`\n` +
-          `DO NOT output the snippet itself. Just output the exact next characters that follow it. Do not include any markdown backticks or conversational text.`,
+        content: `Your last response hit the maximum length limit before finishing the file "${targetPath}".\n` +
+          `Please continue exactly from where you left off. Start your response with the exact next character.\n` +
+          `Do NOT repeat any code you already wrote. Do NOT include any conversational text or markdown code fences.`,
       });
       setTimeout(() => runAgentTurn(null), 500);
       return;
@@ -710,7 +733,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
         _projectMemory = updateManifestFromFile(_projectMemory, absPath, fileContent, root);
         _projectMemory.dependencyMap = updateDependencyMap(_projectMemory.dependencyMap, absPath, fileContent, root);
         // Save memory asynchronously (don't block the agent)
-        saveProjectMemory(root, _projectMemory).catch(() => {});
+        saveProjectMemory(root, _projectMemory).catch(() => { });
       }
 
       await refreshFileTree(root);
@@ -762,8 +785,10 @@ async function handleCompletedTurn(content: string): Promise<void> {
 
     } catch (err: any) {
       aiStore.addAgentLog(`✗ Failed to write: ${err.message || err}`);
-      aiStore.addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[write_file error]: Could not write "${targetPath}": ${err.message || err}. Try again.` });
+      aiStore.addMessage({
+        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+        content: `[write_file error]: Could not write "${targetPath}": ${err.message || err}. Try again.`
+      });
     }
 
     setTimeout(() => runAgentTurn(null), 500);
@@ -783,8 +808,10 @@ async function handleCompletedTurn(content: string): Promise<void> {
     } catch (err: any) {
       fc = `Error: ${err.message || err}`;
     }
-    aiStore.addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[read_file "${targetPath}"]:\n\`\`\`\n${fc}\n\`\`\`` });
+    aiStore.addMessage({
+      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+      content: `[read_file "${targetPath}"]:\n\`\`\`\n${fc}\n\`\`\``
+    });
     setTimeout(() => runAgentTurn(null), 500);
     return;
   }
@@ -805,11 +832,15 @@ async function handleCompletedTurn(content: string): Promise<void> {
     if (approved) {
       const output = await runShell(cmd);
       aiStore.addAgentLog(`✓ Command done`);
-      aiStore.addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[run_command \`${cmd}\`]:\n\`\`\`\n${output}\n\`\`\`` });
+      aiStore.addMessage({
+        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+        content: `[run_command \`${cmd}\`]:\n\`\`\`\n${output}\n\`\`\``
+      });
     } else {
-      aiStore.addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[run_command]: User rejected \`${cmd}\`.` });
+      aiStore.addMessage({
+        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+        content: `[run_command]: User rejected \`${cmd}\`.`
+      });
     }
     setTimeout(() => runAgentTurn(null), 500);
     return;
@@ -826,8 +857,10 @@ async function handleCompletedTurn(content: string): Promise<void> {
       output = entries.length === 0 ? "(empty)" : entries.map(e => `${e.is_dir ? "📁" : "📄"} ${e.name}`).join("\n");
       aiStore.addAgentLog(`✓ Listed ${entries.length} entries`);
     } catch (err: any) { output = `Error: ${err.message}`; }
-    aiStore.addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[list_dir "${targetPath}"]:\n\`\`\`\n${output}\n\`\`\`` });
+    aiStore.addMessage({
+      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+      content: `[list_dir "${targetPath}"]:\n\`\`\`\n${output}\n\`\`\``
+    });
     setTimeout(() => runAgentTurn(null), 500);
     return;
   }
@@ -844,8 +877,10 @@ async function handleCompletedTurn(content: string): Promise<void> {
       output = results.length === 0 ? "No results." : results.map(r => `${r.file}:${r.line} — ${r.text}`).join("\n");
       aiStore.addAgentLog(`✓ ${results.length} search results`);
     } catch (err: any) { output = `Error: ${err.message}`; }
-    aiStore.addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[search_files "${query}"]:\n\`\`\`\n${output}\n\`\`\`` });
+    aiStore.addMessage({
+      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+      content: `[search_files "${query}"]:\n\`\`\`\n${output}\n\`\`\``
+    });
     setTimeout(() => runAgentTurn(null), 500);
     return;
   }
