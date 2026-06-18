@@ -219,7 +219,7 @@ function resolvePath(root: string, rel: string): string {
   return `${root}${sep}${clean}`;
 }
 
-function extractFilePath(openTag: string, content: string): string {
+function extractFilePath(openTag: string, content: string): string | null {
   const patterns = [
     /\bpath\s*=\s*["']([^"'>\n]+)["']/i,
     /\bpath\s*=\s*([^\s>"']+)/i,
@@ -238,7 +238,7 @@ function extractFilePath(openTag: string, content: string): string {
       return t;
     }
   }
-  return "untitled.txt";
+  return null;
 }
 
 function parsePlan(text: string): AgentStep[] {
@@ -653,10 +653,11 @@ async function handleCompletedTurn(content: string): Promise<void> {
       aiStore.setTruncatedFile({ path: truncatedFile.path, contentSoFar: appendedContent });
 
       aiStore.addMessage({
-        id: `sys-${Date.now()}`, role: "user", timestamp: Date.now(),
-        content: `Your response hit the limit again. Please continue writing the code exactly from where you left off.\n` +
+        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+        content: `[SYSTEM — CONTINUATION REQUIRED]: Your response hit the limit again.\n` +
+          `Continue writing the code exactly from where you left off.\n` +
           `Do NOT repeat any code you already wrote. Start your response with the exact next character.\n` +
-          `Do NOT include any conversational text or markdown code fences.`,
+          `CRITICAL: DO NOT include ANY conversational text, apologies, or markdown code fences. START TYPING CODE IMMEDIATELY.`,
       });
       setTimeout(() => runAgentTurn(null), 500);
       return;
@@ -672,7 +673,19 @@ async function handleCompletedTurn(content: string): Promise<void> {
     // Check if the model hit token limits and left an unclosed <write_file> tag
     const openTagMatch = content.match(/<write_file\b([^>]*)>([\s\S]*)$/i);
     if (openTagMatch && !content.includes("</write_file>")) {
-      let targetPath = extractFilePath(`<write_file ${openTagMatch[1]}>`, "").replace(/^\/+/, "");
+      let targetPathRaw = extractFilePath(`<write_file ${openTagMatch[1]}>`, "");
+      if (!targetPathRaw) {
+        // Tag was cut off before path could be written, or hallucinated. Re-prompt.
+        aiStore.addAgentLog(`⚠️ Token limit hit, but no valid path found. Re-prompting.`);
+        aiStore.addMessage({
+          id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+          content: `[SYSTEM ERROR]: Your last response hit the token limit, but no valid file path was detected in your <write_file> tag.\n` +
+            `Please rewrite the file from the beginning, ensuring you include the path: <write_file path="filename.ext">`
+        });
+        setTimeout(() => runAgentTurn(null), 500);
+        return;
+      }
+      let targetPath = targetPathRaw.replace(/^\/+/, "");
 
       // Save the state into the store so the NEXT turn knows to append
       aiStore.setTruncatedFile({
@@ -685,10 +698,11 @@ async function handleCompletedTurn(content: string): Promise<void> {
       // We don't synthesize a match here anymore because we don't want to save a broken file.
       // We just ask for the continuation right away.
       aiStore.addMessage({
-        id: `sys-${Date.now()}`, role: "user", timestamp: Date.now(),
-        content: `Your last response hit the maximum length limit before finishing the file "${targetPath}".\n` +
-          `Please continue exactly from where you left off. Start your response with the exact next character.\n` +
-          `Do NOT repeat any code you already wrote. Do NOT include any conversational text or markdown code fences.`,
+        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+        content: `[SYSTEM — CONTINUATION REQUIRED]: Your last response hit the token limit before finishing the file "${targetPath}".\n` +
+          `Continue exactly from where you left off. Start your response with the exact next character.\n` +
+          `Do NOT repeat any code you already wrote. \n` +
+          `CRITICAL: DO NOT include ANY conversational text, apologies, or markdown code fences. START TYPING CODE IMMEDIATELY.`,
       });
       setTimeout(() => runAgentTurn(null), 500);
       return;
@@ -701,7 +715,18 @@ async function handleCompletedTurn(content: string): Promise<void> {
       .replace(/\n?```\s*$/i, "")
       .replace(/^\n/, "");
 
-    let targetPath = extractFilePath(`<write_file ${writeMatch[1]}>`, fileContent).replace(/^\/+/, "");
+    let targetPathRaw = extractFilePath(`<write_file ${writeMatch[1]}>`, fileContent);
+    if (!targetPathRaw) {
+      aiStore.addAgentLog(`⚠️ Invalid <write_file> tag without path. Re-prompting.`);
+      aiStore.addMessage({
+        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+        content: `[SYSTEM ERROR]: You attempted to write a file but provided no valid path.\n` +
+          `You MUST use the format: <write_file path="your/file/path.ext">`
+      });
+      setTimeout(() => runAgentTurn(null), 500);
+      return;
+    }
+    let targetPath = targetPathRaw.replace(/^\/+/, "");
 
     aiStore.setAgentStatus("generating");
     aiStore.addAgentLog(`📝 Writing: ${targetPath} (${fileContent.length} chars)`);
