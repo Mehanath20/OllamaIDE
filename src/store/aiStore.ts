@@ -55,6 +55,10 @@ interface AIState {
   commandPermissionResolve: ((approved: boolean) => void) | null;
   filePermissionResolve: ((approved: boolean) => void) | null;
 
+  // Multi-turn truncated file generation
+  truncatedFile: { path: string, contentSoFar: string } | null;
+  setTruncatedFile: (data: { path: string, contentSoFar: string } | null) => void;
+
   // Actions
   addMessage: (msg: ChatMessage) => void;
   updateLastMessageContent: (content: string) => void;
@@ -106,6 +110,9 @@ export const useAIStore = create<AIState>((set) => ({
   pendingCommand: null,
   commandPermissionResolve: null,
   filePermissionResolve: null,
+  truncatedFile: null,
+
+  setTruncatedFile: (d) => set({ truncatedFile: d }),
 
   addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
   updateLastMessageContent: (content) =>

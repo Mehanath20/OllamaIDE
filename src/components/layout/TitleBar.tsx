@@ -7,8 +7,9 @@ import { useTerminalStore } from "../../store/terminalStore";
 import { useAIStore } from "../../store/aiStore";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+// No icons needed directly on this line anymore if Plane was the only unused one. Let's just remove it.
+// If there are other unused ones here, they weren't in the error log.
 import { getLanguageFromExt } from "../../lib/fileIcons";
-import { Plane } from "lucide-react";
 
 
 type MenuItemDef =

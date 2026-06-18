@@ -11,7 +11,7 @@ import EditorTabs from "./EditorTabs";
 import Breadcrumb from "./Breadcrumb";
 import MonacoEditor from "./MonacoEditor";
 import DiffEditor from "./DiffEditor";
-import { FolderOpen, MessageSquare, Wrench, Zap, FileText, CheckCircle2, Plane, SplitSquareHorizontal } from "lucide-react";
+import { FolderOpen, MessageSquare, Wrench, Zap, FileText, CheckCircle2, SplitSquareHorizontal } from "lucide-react";
 
 export default function EditorGroup() {
   const { openFiles, activeFile, splitMode, splitActiveFile, toggleSplitMode } = useEditorStore();

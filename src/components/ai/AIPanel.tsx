@@ -22,8 +22,9 @@ import {
   startOllama,
   listModels,
 } from "../../lib/ollama";
-import { runAgentTurn } from "../../lib/agent";
+import { runAgentTurn, reindexWorkspace, resetAgentMemory } from "../../lib/agent";
 import { resolveFileMentions } from "../../lib/fileUtils";
+import { useFileStore } from "../../store/fileStore";
 import ChatMessage from "./ChatMessage";
 import AgentStatus from "./AgentStatus";
 
@@ -50,7 +51,10 @@ export default function AIPanel() {
   const [inputVal, setInputVal] = useState("");
   const [checking, setChecking] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [isIndexing, setIsIndexing] = useState(false);
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
+
+  const { workspaceRoot } = useFileStore();
   
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,6 +67,11 @@ export default function AIPanel() {
     checkConnection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reset agent memory whenever workspace changes
+  useEffect(() => {
+    resetAgentMemory();
+  }, [workspaceRoot]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -230,8 +239,17 @@ export default function AIPanel() {
               <Plus size={13} />
             </button>
           )}
-          <button className="btn-header-action" onClick={checkConnection} title="Refresh connection">
-            <RefreshCw size={12} className={checking ? "spin" : ""} />
+          <button
+            className="btn-header-action"
+            onClick={async () => {
+              setIsIndexing(true);
+              await reindexWorkspace();
+              setIsIndexing(false);
+            }}
+            title="Re-index project (RAG context)"
+            disabled={isIndexing}
+          >
+            <RefreshCw size={12} className={isIndexing ? "spin" : ""} />
           </button>
         </div>
       </div>

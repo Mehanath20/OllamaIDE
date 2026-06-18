@@ -60,7 +60,7 @@ export default function SettingsModal() {
 
         <div className="settings-body">
           {/* AI Settings */}
-          <div className="settings-section">
+          <div className="settings-section" id="settings-ai">
             <h3 className="settings-section-title">
               <Cpu size={14} /> AI Configuration
             </h3>
@@ -105,7 +105,7 @@ export default function SettingsModal() {
           </div>
 
           {/* Editor Settings */}
-          <div className="settings-section">
+          <div className="settings-section" id="settings-editor">
             <h3 className="settings-section-title">
               <FileCode size={14} /> Editor
             </h3>

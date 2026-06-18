@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useState, useRef, useEffect } from "react";
 import {
   FolderOpen,
   Search,
@@ -20,7 +20,17 @@ const NAV_ITEMS: { id: View; icon: ReactNode; label: string }[] = [
 ];
 
 export default function ActivityBar() {
-  const { sidebarView, setSidebarView, agentPanelOpen, setAgentPanelOpen } = useUIStore();
+  const { 
+    sidebarView, 
+    setSidebarView, 
+    agentPanelOpen, 
+    setAgentPanelOpen, 
+    setSettingsOpen,
+    setCommandPaletteOpen,
+    setKeybindingOpen
+  } = useUIStore();
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const handleClick = (id: View) => {
     if (id === "ai") {
@@ -34,6 +44,20 @@ export default function ActivityBar() {
       setSidebarView(id as any);
     }
   };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setSettingsMenuOpen(false);
+      }
+    };
+    if (settingsMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [settingsMenuOpen]);
 
   return (
     <div className="activity-bar">
@@ -55,9 +79,82 @@ export default function ActivityBar() {
       </div>
 
       <div className="activity-bottom">
-        <button className="activity-item" title="Settings" onClick={() => useUIStore.getState().setSettingsOpen(true)}>
-          <Settings size={22} />
-        </button>
+        <div style={{ position: 'relative', width: '100%' }} ref={menuRef}>
+          <button 
+            className={`activity-item ${settingsMenuOpen ? "activity-item--active" : ""}`} 
+            title="Manage" 
+            onClick={() => setSettingsMenuOpen(!settingsMenuOpen)}
+          >
+            <Settings size={22} />
+          </button>
+
+          {settingsMenuOpen && (
+            <div className="settings-context-menu">
+              <div 
+                className="settings-menu-item"
+                onClick={() => { 
+                  setSettingsOpen(true); 
+                  setSettingsMenuOpen(false); 
+                  setTimeout(() => {
+                    document.getElementById("settings-editor")?.scrollIntoView({ behavior: "smooth" });
+                  }, 100);
+                }}
+              >
+                <span>Editor Settings</span>
+              </div>
+              <div 
+                className="settings-menu-item"
+                onClick={() => { 
+                  setSettingsOpen(true); 
+                  setSettingsMenuOpen(false); 
+                  setTimeout(() => {
+                    document.getElementById("settings-ai")?.scrollIntoView({ behavior: "smooth" });
+                  }, 100);
+                }}
+              >
+                <span>Open Antigravity User Settings</span>
+                <span className="settings-menu-shortcut">Ctrl+,</span>
+              </div>
+              <div className="settings-menu-divider" />
+              <div 
+                className="settings-menu-item"
+                onClick={() => { setSidebarView("extensions"); setSettingsMenuOpen(false); }}
+              >
+                <span>Extensions</span>
+                <span className="settings-menu-shortcut">Ctrl+Shift+X</span>
+              </div>
+              <div 
+                className="settings-menu-item"
+                onClick={() => { 
+                  setKeybindingOpen(true); 
+                  setSettingsMenuOpen(false); 
+                }}
+              >
+                <span>Open Keyboard Shortcuts</span>
+                <span className="settings-menu-shortcut">Ctrl+K Ctrl+S</span>
+              </div>
+              <div 
+                className="settings-menu-item"
+                onClick={() => { 
+                  setCommandPaletteOpen(true); 
+                  setSettingsMenuOpen(false); 
+                }}
+              >
+                <span>Configure Snippets</span>
+              </div>
+              <div className="settings-menu-divider" />
+              <div 
+                className="settings-menu-item"
+                onClick={() => { 
+                  setCommandPaletteOpen(true); 
+                  setSettingsMenuOpen(false); 
+                }}
+              >
+                <span>Tasks</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <style>{`
@@ -79,6 +176,7 @@ export default function ActivityBar() {
           align-items: center;
           padding: var(--space-2) 0;
           gap: 2px;
+          width: 100%;
         }
 
         .activity-item {
@@ -114,6 +212,52 @@ export default function ActivityBar() {
           height: 24px;
           background: var(--accent);
           border-radius: 0 2px 2px 0;
+        }
+
+        .settings-context-menu {
+          position: absolute;
+          bottom: 10px;
+          left: 100%;
+          margin-left: 10px;
+          background: var(--bg-0, #1e1e1e);
+          border: 1px solid var(--border-soft, #333);
+          border-radius: 6px;
+          width: 320px;
+          padding: 6px 0;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+          z-index: 1000;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .settings-menu-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 8px 16px;
+          color: var(--text-primary, #ccc);
+          font-size: 13px;
+          cursor: pointer;
+        }
+
+        .settings-menu-item:hover {
+          background: var(--accent, #007acc);
+          color: #fff;
+        }
+
+        .settings-menu-shortcut {
+          color: var(--text-muted, #888);
+          font-size: 12px;
+        }
+
+        .settings-menu-item:hover .settings-menu-shortcut {
+          color: rgba(255, 255, 255, 0.8);
+        }
+
+        .settings-menu-divider {
+          height: 1px;
+          background: var(--border-soft, #333);
+          margin: 4px 0;
         }
       `}</style>
     </div>

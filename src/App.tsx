@@ -15,6 +15,7 @@ import CommandPalette from "./components/ui/CommandPalette";
 import SettingsModal from "./components/ui/SettingsModal";
 import AboutModal from "./components/ui/AboutModal";
 import ModelManagerModal from "./components/ui/ModelManagerModal";
+import Keybinding from "./components/ui/Keybinding";
 import { useUIStore } from "./store/uiStore";
 import { useInlineCompletions } from "./components/ai/InlineSuggest";
 import DiffReview from "./components/ai/DiffReview";
@@ -36,6 +37,7 @@ export default function App() {
     setQuickOpenOpen,
     setAiCommandPaletteOpen,
     setModelLibraryOpen,
+    setKeybindingOpen,
   } = useUIStore();
 
   // Global keyboard shortcuts
@@ -75,9 +77,10 @@ export default function App() {
         setQuickOpenOpen(false);
         setAiCommandPaletteOpen(false);
         setModelLibraryOpen(false);
+        setKeybindingOpen(false);
       }
     },
-    [commandPaletteOpen, quickOpenOpen, bottomPanelOpen, aiCommandPaletteOpen, setCommandPaletteOpen, setQuickOpenOpen, setBottomPanelOpen, setAiCommandPaletteOpen, setModelLibraryOpen]
+    [commandPaletteOpen, quickOpenOpen, bottomPanelOpen, aiCommandPaletteOpen, setCommandPaletteOpen, setQuickOpenOpen, setBottomPanelOpen, setAiCommandPaletteOpen, setModelLibraryOpen, setKeybindingOpen]
   );
 
   useEffect(() => {
@@ -167,6 +170,7 @@ export default function App() {
       <SettingsModal />
       <AboutModal />
       <ModelManagerModal />
+      <Keybinding />
       <BranchSelector />
 
       <style>{`

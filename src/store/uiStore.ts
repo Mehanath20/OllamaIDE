@@ -25,6 +25,7 @@ interface UIState {
   aiCommandPaletteOpen: boolean;
   settingsOpen: boolean;
   aboutOpen: boolean;
+  keybindingOpen: boolean;
   cursorPosition: CursorPosition | null;
   selectedCode: string | null;
   installedExtensions: any[]; // Store extension objects
@@ -46,6 +47,7 @@ interface UIState {
   setAiCommandPaletteOpen: (v: boolean) => void;
   setSettingsOpen: (v: boolean) => void;
   setAboutOpen: (v: boolean) => void;
+  setKeybindingOpen: (v: boolean) => void;
   setCursorPosition: (pos: CursorPosition) => void;
   setSelectedCode: (code: string | null) => void;
   setInstalledExtensions: (exts: any[] | ((prev: any[]) => any[])) => void;
@@ -72,6 +74,7 @@ export const useUIStore = create<UIState>()(
   aiCommandPaletteOpen: false,
   settingsOpen: false,
   aboutOpen: false,
+  keybindingOpen: false,
   cursorPosition: null,
   selectedCode: null,
   installedExtensions: [],
@@ -93,6 +96,7 @@ export const useUIStore = create<UIState>()(
   setAiCommandPaletteOpen: (aiCommandPaletteOpen) => set({ aiCommandPaletteOpen }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setAboutOpen: (aboutOpen) => set({ aboutOpen }),
+  setKeybindingOpen: (keybindingOpen) => set({ keybindingOpen }),
   setCursorPosition: (cursorPosition) => set({ cursorPosition }),
   setSelectedCode: (selectedCode) => set({ selectedCode }),
   setInstalledExtensions: (exts) => set((state) => ({ 
