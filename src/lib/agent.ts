@@ -68,7 +68,8 @@ Task done:     <done>Summary of everything created.</done>
 
 const CODER_RULES = BASE_RULES + `
 == CODER EXECUTION PROTOCOL ==
-TURN 1 — Planning: Output a <plan> listing ALL file paths you will create.
+TURN 1 — Planning: Output ONLY a <plan> listing ALL file paths you will create.
+  You MUST start your response immediately with <plan>. Do NOT output any reasoning, architecture decisions, or explanations. Just the plan.
   Use this exact format (one file per line):
   - [ ] index.html
   - [ ] css/style.css
@@ -241,10 +242,19 @@ function extractFilePath(openTag: string, content: string): string {
 }
 
 function parsePlan(text: string): AgentStep[] {
+  let planContent = "";
   const m = text.match(/<plan>([\s\S]*?)<\/plan>/i);
-  if (!m) return [];
+  if (m) {
+    planContent = m[1];
+  } else {
+    // Fallback: If <plan> exists but is unclosed, grab everything after it
+    const openMatch = text.match(/<plan>([\s\S]*)$/i);
+    if (openMatch) planContent = openMatch[1];
+  }
+  
+  if (!planContent) return [];
   let id = 1;
-  const lines = m[1].split("\n").map(l => l.trim()).filter(Boolean);
+  const lines = planContent.split("\n").map(l => l.trim()).filter(Boolean);
   const steps: AgentStep[] = [];
 
   for (const line of lines) {
@@ -252,8 +262,8 @@ function parsePlan(text: string): AgentStep[] {
     let isCompleted = false;
 
     // Format 1: - [ ] path/file.ext  OR  - [x] path/file.ext
-    if (line.match(/^-\s*\[[xX\s]\]/)) {
-      filePath = line.replace(/^-\s*\[[xX\s]\]\s*/, "").trim();
+    if (line.match(/^[-*•]\s*\[[xX\s]\]/)) {
+      filePath = line.replace(/^[-*•]\s*\[[xX\s]\]\s*/, "").trim();
       isCompleted = line.includes("[x]") || line.includes("[X]");
     }
     // Format 2: 1. path/file.ext  (numbered list)
@@ -261,8 +271,8 @@ function parsePlan(text: string): AgentStep[] {
       filePath = line.replace(/^\d+\.\s+/, "").trim();
     }
     // Format 3: - path/file.ext  (plain bullet)
-    else if (line.match(/^-\s+/) && !line.includes("[")) {
-      filePath = line.replace(/^-\s+/, "").trim();
+    else if (line.match(/^[-*•]\s+/) && !line.includes("[")) {
+      filePath = line.replace(/^[-*•]\s+/, "").trim();
     }
     // Format 4: bare path on its own line that looks like a file
     else if (!line.startsWith("<") && !line.startsWith("#") && line.includes(".") && !line.includes(" ")) {
