@@ -1,12 +1,5 @@
 /* ============================================================
-   agent.ts — AntiNetwork Agent Engine (v4 — Production)
-   Multi-stage pipeline:
-     1. Memory Load  → reads project manifest, dep map, decisions
-     2. RAG Retrieval → smart context from indexed files
-     3. Planner      → generates plan with dependency analysis
-     4. Coder        → writes files ONE at a time
-     5. Validator    → checks connectivity before saving
-     6. Memory Save  → updates manifest + dep map post-write
+   agent.ts — AntiNetwork Agent Engine (v5 — Stable)
    ============================================================ */
 import { invoke } from "@tauri-apps/api/core";
 import { useAIStore, ChatMessage, AgentStep } from "../store/aiStore";
@@ -23,203 +16,155 @@ import {
   buildProjectIndex, indexSingleFile,
   retrieveRelevantContext, getDependents, getProjectIndex,
 } from "./agentIndexer";
-import {
-  validateFileConnectivity, formatValidationResult,
-} from "./agentValidator";
+import { validateFileConnectivity, formatValidationResult } from "./agentValidator";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+const MAX_HISTORY    = 6;           // messages kept in LLM payload
+const MAX_TURNS      = 60;          // hard stop to prevent infinite loops
+const TURN_DELAY_MS  = 250;         // pause between autonomous turns
+const CTX_BUDGET     = 5_000;       // max chars injected as workspace context
+const FIRST_MSG_CAP  = 10_000;      // char cap for initial user message
+const MSG_CAP        = 2_000;       // char cap for subsequent messages
+const MAX_CONT       = 5;           // max continuation turns before force-save
+const MAX_NO_ACTION  = 2;           // max blank turns before skipping a file
+const TINY_CONT_LEN  = 400;         // chars: if continuation is shorter, auto-close
 
-const MAX_HISTORY_MESSAGES = 20;
-const MAX_AUTO_TURNS = 40;
-let autoTurnCount = 0;
-
-// In-memory project memory (loaded once per workspace session)
+// ─── Module State ─────────────────────────────────────────────────────────────
+let _turnCount       = 0;
+let _contAttempts    = 0;
+let _noActionCount   = 0;
+let _sessionId       = `s-${Date.now()}`;
 let _projectMemory: ProjectMemory | null = null;
-let _indexedWorkspace = "";
-
-// ─── System Prompts ───────────────────────────────────────────────────────────
-
-const BASE_RULES = `You are AntiNetwork, an elite autonomous AI coding agent embedded in a local IDE.
-You interact with the filesystem using XML action tags.
-
-== ACTIONS (use EXACTLY these formats) ==
-Read a file:   <read_file path="src/app.js"/>
-Run command:   <run_command>npm install express</run_command>
-List folder:   <list_dir path="./src"/>
-Search files:  <search_files query="useState" path="./src"/>
-Write a file:  <write_file path="src/App.tsx">FULL FILE CONTENT HERE</write_file>
-Task done:     <done>Summary of everything created.</done>
-
-== ANTI-HALLUCINATION LAWS — NEVER BREAK THESE ==
-1. NEVER claim a file was created without using <write_file>. No exceptions.
-2. NEVER output <done> while files are still pending. You MUST write every file first.
-3. NEVER abbreviate file content with '// rest of code', '// TODO', or '...'.
-   Every file must contain 100% complete, working, production-ready code.
-4. NEVER invent file paths that were not in your plan.
-5. NEVER skip a file from the plan. Every planned file MUST be written.
-6. ONE action per response. Do NOT mix <write_file> and <done> in the same response.
-7. Do NOT wrap <write_file> tags inside markdown code fences.
-
-== FILE CONNECTIVITY LAWS ==
-- Every component/module you create MUST be imported somewhere.
-- Every page you create MUST be reachable via a link or route.
-- Every API/service MUST be called from the frontend.
-`;
-
-const CODER_RULES = BASE_RULES + `
-== CODER EXECUTION PROTOCOL ==
-TURN 1 — Planning: Output ONLY a <plan> listing ALL file paths you will create.
-  You MUST start your response immediately with <plan>. Do NOT output any reasoning, architecture decisions, or explanations. Just the plan.
-  Use this exact format (one file per line):
-  - [ ] index.html
-  - [ ] css/style.css
-  - [ ] js/app.js
-  Do NOT write any code in Turn 1. Only output the <plan> block.
-  Do NOT output <done> in Turn 1.
-
-TURN 2+ — Execution: Write exactly ONE file per turn using <write_file path="...">.
-  After each file, wait for the system to confirm and tell you the next file.
-  Only output <done> when the system confirms ALL files have been written.
-
-== SMALL MODEL OPTIMIZATION (for Qwen/GLM/DeepSeek) ==
-- Focus on ONE task at a time.
-- Write complete working code without asking for clarification.
-- Use standard patterns for the detected tech stack.
-- When in doubt, write more code, not less.
-- Assume all paths are relative to the project root unless told otherwise.
-`;
+let _indexedRoot     = "";
+let _isEditMode      = false;
+let _projectType: ProjectType = "generic";
+const _written       = new Map<string, string>(); // path → content written this task
 
 // ─── Project Type Detection ───────────────────────────────────────────────────
-
 type ProjectType = "html" | "react" | "vue" | "node" | "python" | "generic";
 
-function detectProjectType(query: string): ProjectType {
-  const q = query.toLowerCase();
-  if (/\breact\b|jsx|tsx|\.jsx|\.tsx|create.react/.test(q)) return "react";
-  if (/\bvue\b|\.vue|nuxt/.test(q)) return "vue";
-  if (/\bexpress\b|node\.js|nodejs|fastify|koa|nestjs|backend api/.test(q)) return "node";
-  if (/\bpython\b|flask|fastapi|django|\.py/.test(q)) return "python";
-  if (/html|css|javascript|vanilla|static site|landing page|e.?commerce|portfolio/.test(q)) return "html";
+function detectProjectType(q: string): ProjectType {
+  const s = q.toLowerCase();
+  if (/\breact\b|jsx|tsx|create.react/.test(s)) return "react";
+  if (/\bvue\b|\.vue|nuxt/.test(s)) return "vue";
+  if (/\bexpress\b|nodejs|fastify|nestjs/.test(s)) return "node";
+  if (/\bpython\b|flask|fastapi|django/.test(s)) return "python";
+  if (/html|css|javascript|vanilla|website|landing|e.?commerce|management\s*system|library|portfolio/.test(s)) return "html";
   return "generic";
 }
 
-function getProjectTypeGuide(type: ProjectType): string {
-  switch (type) {
-    case "react":
-      return `
-== REACT PROJECT RULES ==
-- Entry point is src/index.tsx or src/main.tsx — it MUST render <App />.
-- App.tsx imports ALL page components and sets up React Router.
-- Every component file exports a default function (PascalCase name).
-- Use useState/useEffect for state. Import them from 'react'.
-- CSS: import './ComponentName.css' at the top of each component.
-- Never use document.getElementById in React — use refs or state.
-- package.json must include: react, react-dom, react-router-dom.
+function detectEditIntent(q: string): boolean {
+  const s = q.toLowerCase();
+  const edit   = /\b(change|update|fix|modify|edit|add to|remove|refactor|improve|adjust|replace|convert)\b/.test(s);
+  const create = /\b(build|create|generate|new project|from scratch|write a|create a)\b/.test(s);
+  return edit && !create;
+}
+
+// ─── System Prompts ───────────────────────────────────────────────────────────
+const BASE = `You are AntiNetwork, an autonomous AI coding agent inside a local IDE.
+You control the filesystem using ONLY these XML action tags:
+
+<read_file path="src/app.js"/>
+<list_dir path="./src"/>
+<search_files query="text" path="./src"/>
+<run_command>npm install</run_command>
+<write_file path="src/app.js">COMPLETE FILE CONTENT HERE</write_file>
+<done>Summary of what was built.</done>
+
+RULES (obey all of them, always):
+1. ONE action tag per response. Never output two actions.
+2. <write_file> must contain 100% complete, working code — never partial, never "// rest here".
+3. Never wrap <write_file> in markdown code fences (no \`\`\`).
+4. Never output <done> while any planned file is still unwritten.
+5. Never invent file paths not in your plan.
 `;
-    case "vue":
-      return `
-== VUE PROJECT RULES ==
-- Entry point is src/main.js — it mounts the App component.
-- App.vue is the root component with <router-view /> for routing.
-- Each .vue file has <template>, <script>, <style scoped> sections.
-- Use Vue Router for navigation between pages.
-- Components use defineComponent or <script setup> syntax.
+
+const CODER_SYS = BASE + `
+WORKFLOW:
+STEP 1 — Plan: Output ONLY a <plan> block listing every file to create.
+  <plan>
+  - [ ] index.html
+  - [ ] assets/css/style.css
+  </plan>
+  No code in this step. No <done>.
+
+STEP 2 — Write: After the system confirms the plan, write ONE file per response.
+  Wait for [FILE SAVED] confirmation before writing the next file.
+  Output <done>summary</done> ONLY after receiving [ALL FILES WRITTEN].
 `;
-    case "node":
-      return `
-== NODE/EXPRESS PROJECT RULES ==
-- Entry point is server.js or index.js — it starts the HTTP server.
-- Routes are defined in a /routes/ directory and imported in server.js.
-- Middleware (auth, cors, bodyParser) is configured in server.js.
-- Use async/await for all database/IO operations.
-- package.json must list all dependencies with correct version ranges.
-- Always include error handling middleware at the end of server.js.
+
+const EDIT_SYS = BASE + `
+EDIT MODE — Modify existing files only. Do NOT rewrite the whole project.
+1. Inspect the provided file context carefully.
+2. Write ONLY the files that need to change.
+3. Use <write_file path="...">complete updated content</write_file>.
+4. Output <done>summary</done> after all changes are written.
+Do NOT create new files unless explicitly asked.
 `;
-    case "python":
-      return `
-== PYTHON PROJECT RULES ==
-- Entry point is main.py or app.py.
-- Use relative imports between project modules.
-- requirements.txt must list ALL dependencies.
-- Flask: routes use @app.route decorator and return jsonify().
-- FastAPI: routes use @app.get/post decorators with Pydantic models.
+
+const ARCH_SYS    = BASE + `ARCHITECT MODE: Write only .md documentation files. No source code.`;
+const DEBUG_SYS   = BASE + `DEBUGGER MODE: Read the failing file, explain the root cause, fix it with <write_file>.`;
+const REVIEW_SYS  = BASE + `REVIEWER MODE: Read the code, then write "code_review.md" covering security, performance, dead code.`;
+const DOC_SYS     = BASE + `DOCUMENTER MODE: Rewrite each file with full JSDoc comments. Output 100% of original code — do not remove anything.`;
+
+const HTML_GUIDE = `
+HTML/JS PROJECT RULES:
+- index.html is the entry point. Every page links to it via nav.
+- CSS: <link rel="stylesheet" href="..."> in the <head> of EVERY html file.
+- JS:  <script src="..."></script> at BOTTOM of every html file that needs it.
+- No ES modules. Use global window variables.
+- All data in localStorage. Use relative paths for assets.
 `;
-    case "html":
-    default:
-      return `
-== HTML/CSS/JS PROJECT RULES ==
-- index.html is the entry point. ALL pages must have a nav link back to index.html.
-- Every CSS file must be linked in EVERY HTML file that uses it: <link rel="stylesheet" href="css/style.css">.
-- Every JS file must be loaded at the BOTTOM of EVERY HTML file that uses it: <script src="js/app.js"></script>.
-- NEVER use ES modules (import/export) in plain HTML projects — use global variables and functions.
-- cart.js, products.js, app.js must all be loaded in the correct order (dependencies first).
-- Store shared data (cart, products) in localStorage and window globals.
-- Use relative paths for all assets: ../images/photo.jpg NOT /images/photo.jpg.
+const REACT_GUIDE = `
+REACT PROJECT RULES:
+- Entry: src/main.tsx renders <App />. App.tsx sets up React Router.
+- Components: PascalCase default exports. Import CSS at component top.
+- State: useState/useEffect. Never use document.getElementById.
+- package.json must list react, react-dom, react-router-dom.
 `;
+const NODE_GUIDE = `
+NODE/EXPRESS RULES:
+- Entry: server.js starts HTTP server. Routes in /routes/ imported in server.js.
+- Use async/await. Error-handling middleware goes last.
+- package.json must list all deps.
+`;
+const VUE_GUIDE = `
+VUE RULES:
+- Entry: src/main.js mounts App. App.vue has <router-view />.
+- Each .vue: <template>, <script setup>, <style scoped>.
+`;
+
+function getSystemPrompt(persona: string, editMode: boolean): string {
+  if (editMode) return EDIT_SYS;
+  switch (persona) {
+    case "Architect":  return ARCH_SYS;
+    case "Debugger":   return DEBUG_SYS;
+    case "Reviewer":   return REVIEW_SYS;
+    case "Documenter": return DOC_SYS;
+    default:           return CODER_SYS;
   }
 }
 
-const PLANNER_RULES = BASE_RULES + `
-== PLANNING RULES ==
-1. Analyze the request and output a <plan> with file paths that are FULLY CONNECTED.
-2. Include an "entrypoint" file that imports everything else.
-3. List files in dependency order: utilities first, then services, then components, then pages.
-4. Include a dependency note: <!-- FILE: src/A.tsx imports src/B.tsx -->
-`;
-
-const ARCHITECT_RULES = BASE_RULES + `
-== ARCHITECT RULES ==
-1. Design the system architecture and write only documentation files (.md).
-2. Focus on folder structure, tech stack decisions, and data flow diagrams.
-3. Do NOT write source code implementation files.
-`;
-
-const DEBUGGER_RULES = BASE_RULES + `
-== DEBUGGER RULES ==
-1. Read the failing file first with <read_file>.
-2. Check related files using the dependency information provided.
-3. Explain the root cause, then fix with <write_file>.
-4. After fixing, check if dependent files also need updating.
-`;
-
-const REVIEWER_RULES = BASE_RULES + `
-== REVIEWER RULES ==
-1. Read and analyze the provided code.
-2. Write findings to "code_review.md" using <write_file>.
-3. Check for: security issues, performance bottlenecks, missing error handling, dead code.
-`;
-
-const DOCUMENTER_RULES = BASE_RULES + `
-== DOCUMENTER RULES ==
-1. Read source files, then rewrite them with full JSDoc/docstring documentation.
-2. Write 100% complete file content including all original code plus documentation.
-`;
-
-function getSystemPrompt(persona: string): string {
-  switch (persona) {
-    case "Architect": return ARCHITECT_RULES;
-    case "Debugger": return DEBUGGER_RULES;
-    case "Reviewer": return REVIEWER_RULES;
-    case "Documenter": return DOCUMENTER_RULES;
-    case "Planner": return PLANNER_RULES;
-    default: return CODER_RULES;
-  }
+function getProjectGuide(t: ProjectType): string {
+  if (t === "html")  return HTML_GUIDE;
+  if (t === "react") return REACT_GUIDE;
+  if (t === "node")  return NODE_GUIDE;
+  if (t === "vue")   return VUE_GUIDE;
+  return "";
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getWorkspaceRoot(): string {
+function getRoot(): string {
   return useFileStore.getState().workspaceRoot || "/tmp/workspace";
 }
 
 function resolvePath(root: string, rel: string): string {
   if (rel.startsWith("/") || /^[A-Za-z]:/.test(rel)) return rel;
-  const clean = rel.replace(/^\.[\\/]/, "");
   const sep = root.includes("\\") ? "\\" : "/";
-  return `${root}${sep}${clean}`;
+  return `${root}${sep}${rel.replace(/^\.[\\/]/, "")}`;
 }
 
-function extractFilePath(openTag: string, content: string): string | null {
+function extractPath(tag: string, body: string): string | null {
   const patterns = [
     /\bpath\s*=\s*["']([^"'>\n]+)["']/i,
     /\bpath\s*=\s*([^\s>"']+)/i,
@@ -227,14 +172,14 @@ function extractFilePath(openTag: string, content: string): string | null {
     /\bname\s*=\s*["']([^"'>\n]+)["']/i,
   ];
   for (const p of patterns) {
-    const m = openTag.match(p);
+    const m = tag.match(p);
     if (m?.[1] && m[1] !== ">" && !m[1].startsWith("<")) return m[1].trim();
   }
-  // Fallback: first line looks like a path
-  for (const line of content.split("\n").slice(0, 3)) {
+  // Fallback: first line of content that looks like a file path
+  for (const line of body.split("\n").slice(0, 3)) {
     const t = line.trim();
     if (t && t.includes(".") && !t.includes(" ") && !t.startsWith("<") &&
-      /\.(html|css|js|ts|json|md|txt|jsx|tsx|py|rs|go|java|php|rb|sql|yaml|yml|toml|sh|xml|svg)$/i.test(t)) {
+        /\.(html|css|js|ts|json|md|txt|jsx|tsx|py|rs|go|java|php|sql|yaml|yml|toml|sh|svg)$/i.test(t)) {
       return t;
     }
   }
@@ -242,737 +187,601 @@ function extractFilePath(openTag: string, content: string): string | null {
 }
 
 function parsePlan(text: string): AgentStep[] {
-  let planContent = "";
-  const m = text.match(/<plan>([\s\S]*?)<\/plan>/i);
-  if (m) {
-    planContent = m[1];
-  } else {
-    // Fallback: If <plan> exists but is unclosed, grab everything after it
-    const openMatch = text.match(/<plan>([\s\S]*)$/i);
-    if (openMatch) planContent = openMatch[1];
+  let block = "";
+  const closed = text.match(/<plan>([\s\S]*?)<\/plan>/i);
+  if (closed) block = closed[1];
+  else {
+    const open = text.match(/<plan>([\s\S]*)$/i);
+    if (open) block = open[1];
   }
-  
-  if (!planContent) return [];
+  if (!block) return [];
+
   let id = 1;
-  const lines = planContent.split("\n").map(l => l.trim()).filter(Boolean);
   const steps: AgentStep[] = [];
+  for (const raw of block.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
 
-  for (const line of lines) {
-    let filePath: string | null = null;
-    let isCompleted = false;
+    let fp: string | null = null;
+    if (line.match(/^[-*•]\s*\[[xX\s]\]/)) fp = line.replace(/^[-*•]\s*\[[xX\s]\]\s*/, "").trim();
+    else if (line.match(/^\d+\.\s+/)) fp = line.replace(/^\d+\.\s+/, "").trim();
+    else if (line.match(/^[-*•]\s+/) && !line.includes("[")) fp = line.replace(/^[-*•]\s+/, "").trim();
+    else if (!line.startsWith("<") && !line.startsWith("#") && line.includes(".") && !line.includes(" ")) fp = line;
 
-    // Format 1: - [ ] path/file.ext  OR  - [x] path/file.ext
-    if (line.match(/^[-*•]\s*\[[xX\s]\]/)) {
-      filePath = line.replace(/^[-*•]\s*\[[xX\s]\]\s*/, "").trim();
-      isCompleted = line.includes("[x]") || line.includes("[X]");
-    }
-    // Format 2: 1. path/file.ext  (numbered list)
-    else if (line.match(/^\d+\.\s+/)) {
-      filePath = line.replace(/^\d+\.\s+/, "").trim();
-    }
-    // Format 3: - path/file.ext  (plain bullet)
-    else if (line.match(/^[-*•]\s+/) && !line.includes("[")) {
-      filePath = line.replace(/^[-*•]\s+/, "").trim();
-    }
-    // Format 4: bare path on its own line that looks like a file
-    else if (!line.startsWith("<") && !line.startsWith("#") && line.includes(".") && !line.includes(" ")) {
-      filePath = line;
-    }
-
-    if (!filePath) continue;
-    // Strip any trailing description after a space
-    filePath = filePath.split(" ")[0];
-    // Reject directories and non-files
-    if (filePath.endsWith("/") || filePath.endsWith("\\")) continue;
-    if (!filePath.match(/\.[a-zA-Z0-9]{1,6}$/)) continue;
-    // Strip leading ./ or /
-    filePath = filePath.replace(/^\.\//, "").replace(/^\/+/, "");
-
-    steps.push({
-      id: `step-${id++}`,
-      text: filePath,
-      status: isCompleted ? "completed" : "pending",
-    });
+    if (!fp) continue;
+    fp = fp.split(" ")[0].replace(/^\.\//, "").replace(/^\/+/, "");
+    if (fp.endsWith("/") || fp.endsWith("\\")) continue;
+    if (!fp.match(/\.[a-zA-Z0-9]{1,6}$/)) continue;
+    steps.push({ id: `step-${id++}`, text: fp, status: "pending" });
   }
   return steps;
 }
 
 function trimHistory(msgs: ChatMessage[]): ChatMessage[] {
-  if (msgs.length <= MAX_HISTORY_MESSAGES) return msgs;
-  return [msgs[0], ...msgs.slice(-(MAX_HISTORY_MESSAGES - 1))];
+  if (msgs.length <= MAX_HISTORY) return msgs;
+  const first = msgs[0]; // always keep initial task
+  const tail  = msgs.slice(-MAX_HISTORY);
+  const tailIds = new Set(tail.map(m => m.id));
+  return tailIds.has(first.id) ? tail : [first, ...tail];
 }
 
 async function runShell(cmd: string): Promise<string> {
-  try {
-    return await invoke<string>("execute_shell", { cmd, cwd: getWorkspaceRoot() });
-  } catch (err: any) {
-    return `Error: ${err.message || err}`;
-  }
+  try { return await invoke<string>("execute_shell", { cmd, cwd: getRoot() }); }
+  catch (e: any) { return `Error: ${e.message || e}`; }
 }
 
-async function refreshFileTree(root: string): Promise<void> {
+async function refreshTree(root: string): Promise<void> {
   try {
     const entries = await invoke<{ name: string; path: string; is_dir: boolean; size?: number }[]>("list_dir", { path: root });
-    useFileStore.getState().setTree(entries.map(e => ({
-      name: e.name, path: e.path, isDir: e.is_dir, size: e.size, children: undefined, expanded: false,
-    })));
-  } catch { }
+    useFileStore.getState().setTree(entries.map(e => ({ name: e.name, path: e.path, isDir: e.is_dir, size: e.size, children: undefined, expanded: false })));
+  } catch { /* non-fatal */ }
 }
 
 const LANG_MAP: Record<string, string> = {
-  ts: "typescript", tsx: "typescriptreact", js: "javascript", jsx: "javascriptreact",
-  py: "python", rs: "rust", go: "go", java: "java", cpp: "cpp", c: "c",
-  cs: "csharp", rb: "ruby", php: "php", html: "html", css: "css",
-  json: "json", yaml: "yaml", yml: "yaml", md: "markdown", sh: "shell",
-  toml: "toml", sql: "sql", kt: "kotlin", swift: "swift", vue: "vue", svelte: "svelte",
+  ts:"typescript",tsx:"typescriptreact",js:"javascript",jsx:"javascriptreact",
+  py:"python",rs:"rust",go:"go",java:"java",cpp:"cpp",c:"c",cs:"csharp",
+  rb:"ruby",php:"php",html:"html",css:"css",json:"json",yaml:"yaml",
+  yml:"yaml",md:"markdown",sh:"shell",toml:"toml",sql:"sql",vue:"vue",svelte:"svelte",
 };
 
 function openInEditor(absPath: string, relPath: string, content: string): void {
-  const ext = relPath.split(".").pop()?.toLowerCase() || "";
+  const ext  = relPath.split(".").pop()?.toLowerCase() || "";
   const lang = LANG_MAP[ext] || "plaintext";
   const name = relPath.split(/[/\\]/).pop() || relPath;
   const store = useEditorStore.getState();
-  const existing = store.openFiles.find(f => f.path === absPath);
-  if (existing) {
-    store.updateContent(absPath, content);
-    store.setActiveFile(absPath);
-    store.markSaved(absPath);
-  } else {
-    store.openFile({ path: absPath, name, content, language: lang, isDirty: false });
-  }
+  const ex = store.openFiles.find(f => f.path === absPath);
+  if (ex) { store.updateContent(absPath, content); store.setActiveFile(absPath); store.markSaved(absPath); }
+  else store.openFile({ path: absPath, name, content, language: lang, isDirty: false });
 }
 
-// ─── Written Files Ledger ─────────────────────────────────────────────────────
-// Tracks files written in the CURRENT task for pre-write context injection
-
-const _writtenThisTask: Map<string, string> = new Map(); // path → content
-let _currentProjectType: ProjectType = "generic";
-
-function getWrittenFileSummary(): string {
-  if (_writtenThisTask.size === 0) return "";
-
-  let summary = `\n== FILES ALREADY WRITTEN THIS SESSION ==\n`;
-  for (const [path, content] of _writtenThisTask) {
-    // Show first 40 lines of each file for import/structure reference
-    const preview = content.split("\n").slice(0, 40).join("\n");
-    const truncated = content.split("\n").length > 40 ? "\n... (truncated)" : "";
-    summary += `\n[${path}]\n\`\`\`\n${preview}${truncated}\n\`\`\`\n`;
+function getWrittenSummary(): string {
+  if (_written.size === 0) return "";
+  let out = "\n[WRITTEN SO FAR]:\n";
+  let chars = 0;
+  for (const [p, c] of _written) {
+    const firstLine = c.split("\n")[0].trim().slice(0, 80);
+    const entry = `  ${p} (${c.split("\n").length} lines) — ${firstLine}\n`;
+    if (chars + entry.length > 600) break;
+    out += entry;
+    chars += entry.length;
   }
-  summary += `\nIMPORTANT: Reference these files for correct import paths and variable names.\n`;
-  return summary;
+  return out;
 }
 
-// ─── Memory + Index Initialization ───────────────────────────────────────────
-
-async function ensureMemoryAndIndex(): Promise<ProjectMemory> {
-  const root = getWorkspaceRoot();
-
-  // Load memory if not already loaded for this workspace
-  if (!_projectMemory) {
-    _projectMemory = await loadProjectMemory(root);
-  }
-
-  // Build index if workspace changed or not yet indexed
-  if (_indexedWorkspace !== root) {
-    const aiStore = useAIStore.getState();
-    aiStore.addAgentLog("🔍 Indexing project files...");
+// ─── Memory & Index ───────────────────────────────────────────────────────────
+async function ensureMemory(): Promise<ProjectMemory> {
+  const root = getRoot();
+  if (!_projectMemory) _projectMemory = await loadProjectMemory(root);
+  if (_indexedRoot !== root) {
+    const store = useAIStore.getState();
+    store.addAgentLog("🔍 Indexing project files...");
     await buildProjectIndex(root, (done, total) => {
-      if (done % 50 === 0) aiStore.addAgentLog(`  Indexed ${done}/${total} files`);
+      if (done % 50 === 0) store.addAgentLog(`  Indexed ${done}/${total} files`);
     });
-    _indexedWorkspace = root;
-    aiStore.addAgentLog(`✓ Index built: ${getProjectIndex()?.totalFiles || 0} files`);
+    _indexedRoot = root;
+    store.addAgentLog(`✓ Index built: ${getProjectIndex()?.totalFiles || 0} files`);
   }
-
-  return _projectMemory;
+  return _projectMemory!;
 }
 
 // ─── Context Builder ──────────────────────────────────────────────────────────
-
-async function buildFullContext(userQuery: string): Promise<string> {
-  const workspaceCtx = getWorkspaceContext();
-  const root = getWorkspaceRoot();
-  const memory = await ensureMemoryAndIndex();
+async function buildContext(userQuery: string): Promise<string> {
+  const ws  = getWorkspaceContext();
+  const root = getRoot();
+  const mem = await ensureMemory();
+  const isGenerating = _written.size > 0;
 
   let ctx = "";
+  let budget = CTX_BUDGET;
+  const add = (s: string) => { if (budget > 0) { ctx += s.slice(0, budget); budget -= s.length; } };
 
-  if (root) ctx += `\n[Workspace: ${root}]`;
+  add(`\n[Workspace: ${root}]`);
 
-  // Active file
-  if (workspaceCtx.activeFile.path) {
-    ctx += `\n[Active file: ${workspaceCtx.activeFile.path}]`;
-    if (workspaceCtx.activeFile.content) {
-      const preview = workspaceCtx.activeFile.content.slice(0, 2000);
-      ctx += `\n\`\`\`\n${preview}${workspaceCtx.activeFile.content.length > 2000 ? "\n...(truncated)" : ""}\n\`\`\``;
-    }
+  if (ws.activeFile.path && !isGenerating) {
+    add(`\n[Active file: ${ws.activeFile.path}]`);
+    if (ws.activeFile.content) add(`\n\`\`\`\n${ws.activeFile.content.slice(0, 350)}\n...\n\`\`\``);
   }
 
-  // Project memory (manifest, decisions, rules)
-  ctx += formatMemoryAsContext(memory);
+  if (!isGenerating && budget > 400) add(formatMemoryAsContext(mem).slice(0, 800));
 
-  // RAG: smart relevant files
-  const ragCtx = await retrieveRelevantContext(
-    userQuery,
-    workspaceCtx.activeFile.path,
-    6,   // max files
-    4000 // max chars total
-  );
-  ctx += ragCtx;
-
-  // Impact analysis: if active file has dependents, note them
-  if (workspaceCtx.activeFile.path) {
-    const relPath = workspaceCtx.activeFile.path.replace(root, "").replace(/^[/\\]/, "");
-    const dependents = getDependents(relPath);
-    if (dependents.length > 0) {
-      ctx += `\n[Files that import this file (will be affected by changes): ${dependents.slice(0, 8).join(", ")}]`;
-    }
+  if (budget > 700) {
+    const rag = await retrieveRelevantContext(userQuery, ws.activeFile.path, isGenerating ? 2 : 4, Math.min(budget - 200, isGenerating ? 1000 : 2000));
+    add(rag);
   }
 
-  // Workspace tree (compact)
-  if (workspaceCtx.fileTree) {
-    ctx += `\n[Project tree (top-level):\n${workspaceCtx.fileTree.slice(0, 1200)}]`;
-  }
+  if (!isGenerating && budget > 300 && ws.fileTree) add(`\n[Tree:\n${ws.fileTree.slice(0, 500)}]`);
 
   return ctx;
 }
 
 // ─── Main Entry Point ─────────────────────────────────────────────────────────
+export async function runAgentTurn(userQuery: string | null, attachedImages: string[] = []): Promise<void> {
+  const store = useAIStore.getState();
+  const model = store.activeModel;
 
-export async function runAgentTurn(
-  userQuery: string | null,
-  attachedImages: string[] = []
-): Promise<void> {
-  const aiStore = useAIStore.getState();
-  const model = aiStore.activeModel;
-  const sessionId = `agent-${Date.now()}`;
-
+  // ── New task initialisation ──────────────────────────────────────────────────
   if (userQuery) {
-    autoTurnCount = 0;
-    aiStore.clearAgentState();
-    aiStore.setAgentAborted(false);
-    // Reset per-task state
-    _writtenThisTask.clear();
-    _currentProjectType = detectProjectType(userQuery);
+    _turnCount    = 0;
+    _contAttempts = 0;
+    _noActionCount = 0;
+    store.clearAgentState();
+    store.setAgentAborted(false);
+    _written.clear();
+    _projectType = detectProjectType(userQuery);
+    _sessionId   = `s-${Date.now()}`;
+    _isEditMode  = detectEditIntent(userQuery) && _indexedRoot !== "";
+    if (_isEditMode) store.addAgentLog("✏️ Edit mode: targeting existing files.");
   }
 
   if (useAIStore.getState().agentAborted) return;
 
-  autoTurnCount++;
-  if (autoTurnCount > MAX_AUTO_TURNS) {
-    aiStore.setAgentStatus("idle");
-    aiStore.addAgentLog(`⚠ Max turns (${MAX_AUTO_TURNS}) reached. Stopping.`);
-    aiStore.addMessage({
-      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[system]: Agent stopped after ${MAX_AUTO_TURNS} turns. Ask it to continue if needed.`
-    });
+  _turnCount++;
+  if (_turnCount > MAX_TURNS) {
+    useAIStore.getState().setAgentAborted(true);
+    useAIStore.getState().setAgentStatus("idle");
+    useAIStore.getState().setTruncatedFile(null);
+    if (_turnCount === MAX_TURNS + 1) {
+      useAIStore.getState().addAgentLog(`⚠ Max turns (${MAX_TURNS}) reached. Stopping.`);
+      useAIStore.getState().addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
+        content: `[system]: Agent reached the ${MAX_TURNS}-turn limit. Send a new message to continue.` });
+    }
     return;
   }
 
-  aiStore.setStreaming(true);
-  let history: ChatMessage[] = [...aiStore.messages];
+  store.setStreaming(true);
+  let history: ChatMessage[] = [...useAIStore.getState().messages];
 
-  // Inject enriched context for new user messages
+  // ── Inject workspace context for the initial turn ─────────────────────────
   if (userQuery) {
-    aiStore.addAgentLog("🧠 Loading project memory & context...");
-    aiStore.addAgentLog(`📦 Project type detected: ${_currentProjectType}`);
-    const contextStr = await buildFullContext(userQuery);
-    // Add project-type-specific guide to the system context
-    const projectGuide = getProjectTypeGuide(_currentProjectType);
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: userQuery + contextStr + projectGuide,
-      timestamp: Date.now(),
+    useAIStore.getState().addAgentLog("🧠 Loading project memory & context...");
+    useAIStore.getState().addAgentLog(`📦 Project type: ${_projectType}`);
+    const ctx   = await buildContext(userQuery);
+    const guide = getProjectGuide(_projectType);
+    const msg: ChatMessage = {
+      id: `user-${Date.now()}`, role: "user", timestamp: Date.now(),
+      content: userQuery + ctx + guide,
       images: attachedImages.length > 0 ? attachedImages : undefined,
     };
-    aiStore.addMessage(userMsg);
-    history.push(userMsg);
+    useAIStore.getState().addMessage(msg);
+    history.push(msg);
   }
 
-  const trimmedHistory = trimHistory(history);
-
-  // Build chat payload
+  // ── Build LLM payload ─────────────────────────────────────────────────────
   const payload: { role: "user" | "assistant" | "system"; content: string; images?: string[] }[] = [
-    { role: "system", content: getSystemPrompt(aiStore.activePersona) },
+    { role: "system", content: getSystemPrompt(useAIStore.getState().activePersona, _isEditMode) },
   ];
 
-  for (const m of trimmedHistory) {
+  let firstUser = true;
+  let lastContent = "";
+  for (const m of trimHistory(history)) {
     if (m.role === "user" || m.role === "assistant") {
-      payload.push({ role: m.role, content: m.content, images: m.images });
+      const cap     = firstUser ? FIRST_MSG_CAP : MSG_CAP;
+      const content = m.content.length > cap ? m.content.slice(0, cap) + "\n...[truncated]" : m.content;
+      if (content === lastContent) continue;
+      lastContent = content;
+      payload.push({ role: m.role, content, images: m.images });
+      if (m.role === "user") firstUser = false;
     } else if (m.role === "system" && m.content.startsWith("[")) {
-      payload.push({ role: "user", content: m.content });
+      const content = m.content.length > MSG_CAP ? m.content.slice(0, MSG_CAP) : m.content;
+      if (content === lastContent) continue;
+      lastContent = content;
+      payload.push({ role: "user", content });
     }
   }
 
-  // Ensure payload doesn't end with assistant message
-  const last = payload[payload.length - 1];
-  if (last?.role === "assistant") {
+  // Payload must not end with assistant — append a push if needed
+  if (payload[payload.length - 1]?.role === "assistant") {
     const pending = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
-    if (pending.length > 0) {
-      payload.push({
-        role: "user",
-        content: `Write the next file now: "${pending[0].text}". Use <write_file path="${pending[0].text}"> with 100% complete content.`
-      });
-    } else {
-      payload.push({ role: "user", content: `All files written. Output <done>summary</done> now.` });
-    }
+    payload.push({
+      role: "user",
+      content: pending.length > 0
+        ? `Write the complete working code for "${pending[0].text}" now using <write_file path="${pending[0].text}"> tag.`
+        : `Output <done>summary</done> now.`,
+    });
   }
 
-  const assistantMsg: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: "", timestamp: Date.now() };
-  aiStore.addMessage(assistantMsg);
-  aiStore.setAgentStatus("thinking");
-  aiStore.addAgentLog(`Thinking... (turn ${autoTurnCount}/${MAX_AUTO_TURNS})`);
+  // ── Stream response ───────────────────────────────────────────────────────
+  const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: "assistant", content: "", timestamp: Date.now() };
+  useAIStore.getState().addMessage(assistantMsg);
+  useAIStore.getState().setAgentStatus("thinking");
+  useAIStore.getState().addAgentLog(`Thinking... (turn ${_turnCount}/${MAX_TURNS})`);
 
   let fullContent = "";
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+  const sid = _sessionId;
+
   try {
-    await chatOllama(sessionId, model, payload, (chunk, done) => {
+    await chatOllama(sid, model, payload, (chunk, done) => {
+      if (sid !== _sessionId) return; // discard stale ghost sessions
       fullContent += chunk;
-      aiStore.updateLastMessageContent(fullContent);
+      if (!debounce) debounce = setTimeout(() => { useAIStore.getState().updateLastMessageContent(fullContent); debounce = null; }, 100);
       if (done) {
-        aiStore.setStreaming(false);
-        handleCompletedTurn(fullContent);
+        if (debounce) { clearTimeout(debounce); debounce = null; }
+        useAIStore.getState().updateLastMessageContent(fullContent);
+        useAIStore.getState().setStreaming(false);
+        setTimeout(() => handleCompletedTurn(fullContent), 0);
       }
     });
   } catch (err: any) {
-    aiStore.setStreaming(false);
-    aiStore.setAgentStatus("idle");
-    aiStore.addAgentLog(`Error: ${err.message || err}`);
-    aiStore.updateLastMessageContent(`⚠️ Ollama error: ${err.message || err}\n\nEnsure Ollama is running.`);
+    useAIStore.getState().setStreaming(false);
+    useAIStore.getState().setAgentStatus("idle");
+    const msg = err.message || String(err);
+    useAIStore.getState().addAgentLog(`❌ Error: ${msg}`);
+    useAIStore.getState().updateLastMessageContent(
+      `⚠️ **Ollama error:** ${msg}\n\n**Fixes:**\n- Ensure Ollama is running\n- Try a larger model (7B+) for complex tasks\n- Restart Ollama from the title bar`
+    );
   }
 }
 
-// ─── Handle Completed Turn ────────────────────────────────────────────────────
-
+// ─── Turn Handler ─────────────────────────────────────────────────────────────
 async function handleCompletedTurn(content: string): Promise<void> {
-  const aiStore = useAIStore.getState();
-  if (aiStore.agentAborted) { aiStore.addAgentLog("⛔ Stopped by user."); return; }
+  const store = useAIStore.getState();
+  if (store.agentAborted) { store.addAgentLog("⛔ Stopped by user."); return; }
 
-  aiStore.addAgentLog("Parsing response...");
+  // ── Parse plan (only accepted when no steps exist yet) ────────────────────
+  const newSteps = parsePlan(content);
+  const hasExisting = useAIStore.getState().agentSteps.some(s => s.status === "pending");
+  if (newSteps.length > 0) {
+    if (!hasExisting) {
+      useAIStore.getState().setAgentSteps(newSteps);
+      useAIStore.getState().addAgentLog(`📋 Plan accepted: ${newSteps.length} files.`);
+    } else {
+      useAIStore.getState().addAgentLog("⚠️ Duplicate <plan> ignored (already executing).");
+    }
+  }
 
-  const steps = parsePlan(content);
-  if (steps.length > 0) aiStore.setAgentSteps(steps);
+  // ── Match action tags ─────────────────────────────────────────────────────
+  const writeM  = content.match(/<write_file\b([^>]*)>([\s\S]*?)<\/write_file>/i);
+  const readM   = content.match(/<read_file\b([^>]*)\/>/i);
+  const runM    = content.match(/<run_command>([\s\S]*?)<\/run_command>/i);
+  const listM   = content.match(/<list_dir\b([^>]*)\/>/i);
+  const searchM = content.match(/<search_files\b([^>]*)\/>/i);
+  const doneM   = content.match(/<done>([\s\S]*?)<\/done>/i);
 
-  const writeRx = /<write_file\b([^>]*)>([\s\S]*?)<\/write_file>/i;
-  const readRx = /<read_file\b([^>]*)\/>/i;
-  const runRx = /<run_command>([\s\S]*?)<\/run_command>/i;
-  const listRx = /<list_dir\b([^>]*)\/>/i;
-  const searchRx = /<search_files\b([^>]*)\/>/i;
-  const doneRx = /<done>([\s\S]*?)<\/done>/i;
-
-  let writeM = content.match(writeRx);
-  const readM = content.match(readRx);
-  const runM = content.match(runRx);
-  const listM = content.match(listRx);
-  const searchM = content.match(searchRx);
-  const doneM = content.match(doneRx);
-
-  const attr = (attrs: string, name: string): string | null => {
+  const attr = (attrs: string, name: string) => {
     const m = attrs.match(new RegExp(`\\b${name}\\s*=\\s*["']?([^"'\\s>]+)["']?`, "i"));
     return m ? m[1].trim() : null;
   };
 
-  // ── DONE ────────────────────────────────────────────────────────────────────
-  // CRITICAL: BLOCK <done> if there are still pending plan steps.
-  // This is the primary fix for the hallucination bug where the model
-  // emits <done> on the same turn as the <plan> without writing any files.
-  if (doneM) {
-    const pendingSteps = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
+  const anyAction = !!(writeM || readM || runM || listM || searchM || doneM);
+  if (anyAction) _noActionCount = 0;
 
-    if (pendingSteps.length > 0) {
-      // Model hallucinated a done — force it to write the next file
-      aiStore.addAgentLog(`⚠️ Premature <done> blocked! ${pendingSteps.length} files still unwritten.`);
-      aiStore.addMessage({
-        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[BLOCKED]: You output <done> but ${pendingSteps.length} files have NOT been written yet.\nYou MUST write them all before signaling done.\nWrite the next file NOW: "${pendingSteps[0].text}"\nUse: <write_file path="${pendingSteps[0].text}">...complete content...</write_file>\nDo NOT output <done> until ALL files are physically written.`,
-      });
-      setTimeout(() => runAgentTurn(null), 500);
+  // ── <done> ────────────────────────────────────────────────────────────────
+  if (doneM) {
+    const stillPending = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
+    if (stillPending.length > 0) {
+      useAIStore.getState().addAgentLog(`⚠️ Premature <done> — ${stillPending.length} file(s) unwritten. Re-prompting.`);
+      sysMsg(`You sent <done> too early. ${stillPending.length} files remain.\nWrite the complete code for "${stillPending[0].text}" now using the <write_file path="${stillPending[0].text}"> tag.`);
+      setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
       return;
     }
-
-    // All steps confirmed written — safe to accept done
-    aiStore.setAgentStatus("idle");
-    aiStore.addAgentLog(`✅ Task complete: ${doneM[1].trim()}`);
-    const currentSteps = useAIStore.getState().agentSteps;
-    if (currentSteps.length > 0) {
-      aiStore.setAgentSteps(currentSteps.map(s => ({ ...s, status: "completed" as const })));
-    }
+    useAIStore.getState().setAgentStatus("idle");
+    useAIStore.getState().addAgentLog(`✅ Task complete.`);
+    useAIStore.getState().setAgentSteps(
+      useAIStore.getState().agentSteps.map(s => ({ ...s, status: "completed" as const }))
+    );
     if (_projectMemory) {
-      const root = getWorkspaceRoot();
-      _projectMemory.activeContext = `Last task: ${doneM[1].trim()} at ${new Date().toISOString()}`;
-      await saveProjectMemory(root, _projectMemory);
+      _projectMemory.activeContext = `Last task completed at ${new Date().toISOString()}`;
+      saveProjectMemory(getRoot(), _projectMemory).catch(() => {});
     }
     return;
   }
 
-  // ── MULTI-TURN CONTINUATION HANDLING ────────────────────────────────────────
-  const truncatedFile = aiStore.truncatedFile;
+  // ── Continuation mode: stitch partial file ────────────────────────────────
+  const truncated = useAIStore.getState().truncatedFile;
+  let effectiveWriteM = writeM;
 
-  if (truncatedFile) {
-    // We are currently in the middle of a multi-turn file generation.
-    // The current content is just a continuation of the previous cut-off content.
-    // Clean the continuation content of any markdown blocks small models might add
-    const cleanContent = content
-      .replace(/^\s*(Sure, here is the continuation|Continuing|Here is the rest|.*previous response got cut off.*).*?\n/i, "") // Strip conversational filler
-      .replace(/^\s*```[a-z]*\n?/i, "")
-      .replace(/\n?```\s*$/i, "");
+  if (truncated) {
+    // Strip conversational filler & markdown fences that small models add
+    const clean = content
+      .replace(/^[\s\S]*?(Sure|Continuing|Here is|Of course)[^\n]*\n/i, "")
+      .replace(/^\s*```[a-z]*\n?/im, "")
+      .replace(/\n?```\s*$/im, "");
 
-    let appendedContent = truncatedFile.contentSoFar;
-    
-    // Check for overlap to prevent snippet duplication (in case the model repeated the end of the previous chunk)
-    let overlapFound = false;
-    for (let len = Math.min(appendedContent.length, cleanContent.length, 500); len > 0; len--) {
-      if (appendedContent.endsWith(cleanContent.substring(0, len))) {
-        appendedContent += cleanContent.substring(len);
-        overlapFound = true;
-        break;
-      }
-    }
-    if (!overlapFound) {
-      appendedContent += cleanContent;
-    }
+    let assembled = truncated.contentSoFar;
 
-    // Auto-close if the continuation is short (meaning the model likely finished the file but forgot to close the tag)
-    if (!appendedContent.includes("</write_file>") && cleanContent.trim().length < 500) {
-      useAIStore.getState().addAgentLog("⚠️ Continuation was short and tag unclosed. Auto-closing file.");
-      appendedContent += "\n</write_file>";
-    }
-
-    // Check if the model FINALLY closed the tag
-    if (appendedContent.includes("</write_file>")) {
-      // It finished! Synthesize the match to process normally.
-      aiStore.addAgentLog("✓ Truncated file completed.");
-      // Clear the truncated state immediately so it doesn't loop
-      aiStore.setTruncatedFile(null);
-
-      const openTagMatch = appendedContent.match(/<write_file\b([^>]*)>([\s\S]*?)<\/write_file>/i);
-      if (openTagMatch) {
-        writeM = openTagMatch;
-      }
+    // Detect restart: model re-emitted the beginning of the file
+    const fileStart = assembled.replace(/<write_file\b[^>]*>/i, "").trim().slice(0, 60);
+    const isRestart = fileStart.length > 20 && clean.includes(fileStart);
+    if (isRestart) {
+      useAIStore.getState().addAgentLog("⚠️ Model restarted — replacing with new content.");
+      const tagM = assembled.match(/^<write_file\b[^>]*>/i);
+      assembled  = (tagM ? tagM[0] + "\n" : "") + clean;
     } else {
-      // Still truncated! Hit max tokens again.
-      aiStore.addAgentLog("⚠️ Still truncated. Requesting another continuation...");
-      aiStore.setTruncatedFile({ path: truncatedFile.path, contentSoFar: appendedContent });
-
-      aiStore.addMessage({
-        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[SYSTEM — CONTINUATION REQUIRED]: Your response hit the limit again.\n` +
-          `Continue writing the code exactly from where you left off.\n` +
-          `Do NOT repeat any code you already wrote. Start your response with the exact next character.\n` +
-          `CRITICAL: DO NOT include ANY conversational text, apologies, or markdown code fences. START TYPING CODE IMMEDIATELY.`,
-      });
-      setTimeout(() => runAgentTurn(null), 500);
-      return;
+      // Stitch: find longest overlap to avoid duplicate characters
+      let stitched = false;
+      for (let len = Math.min(assembled.length, clean.length, 200); len > 0; len--) {
+        if (assembled.endsWith(clean.slice(0, len))) { assembled += clean.slice(len); stitched = true; break; }
+      }
+      if (!stitched) assembled += clean;
     }
-    // If we appended content and found </write_file>, we synthesized writeM.
-    // If not, we already returned. So if we are here, writeM is defined and we process it normally.
-  }
 
-  // ── WRITE FILE ──────────────────────────────────────────────────────────────
-  let writeMatch = writeM;
+    // Auto-close if continuation is tiny (model likely just finished)
+    if (!assembled.includes("</write_file>") && clean.trim().length < TINY_CONT_LEN) {
+      useAIStore.getState().addAgentLog("⚠️ Short continuation — auto-closing file.");
+      assembled += "\n</write_file>";
+    }
 
-  if (!writeMatch && !truncatedFile) {
-    // Check if the model hit token limits and left an unclosed <write_file> tag
-    const openTagMatch = content.match(/<write_file\b([^>]*)>([\s\S]*)$/i);
-    if (openTagMatch && !content.includes("</write_file>")) {
-      let targetPathRaw = extractFilePath(`<write_file ${openTagMatch[1]}>`, "");
-      if (!targetPathRaw) {
-        // Tag was cut off before path could be written, or hallucinated. Re-prompt.
-        aiStore.addAgentLog(`⚠️ Token limit hit, but no valid path found. Re-prompting.`);
-        aiStore.addMessage({
-          id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-          content: `[SYSTEM ERROR]: Your last response hit the token limit, but no valid file path was detected in your <write_file> tag.\n` +
-            `Please rewrite the file from the beginning, ensuring you include the path: <write_file path="filename.ext">`
-        });
-        setTimeout(() => runAgentTurn(null), 500);
+    if (assembled.includes("</write_file>")) {
+      useAIStore.getState().addAgentLog("✓ Multi-turn file assembled.");
+      useAIStore.getState().setTruncatedFile(null);
+      const fullMatch = assembled.match(/<write_file\b([^>]*)>([\s\S]*?)<\/write_file>/i);
+      if (fullMatch) effectiveWriteM = fullMatch;
+      // fall through to write handler
+    } else {
+      _contAttempts++;
+      if (_contAttempts >= MAX_CONT) {
+        useAIStore.getState().addAgentLog(`⚠️ Max continuations hit. Force-saving "${truncated.path}".`);
+        assembled += "\n</write_file>";
+        useAIStore.getState().setTruncatedFile(null);
+        _contAttempts = 0;
+        const fm = assembled.match(/<write_file\b([^>]*)>([\s\S]*?)<\/write_file>/i);
+        if (fm) effectiveWriteM = fm;
+      } else {
+        useAIStore.getState().addAgentLog(`⚠️ Still truncated (attempt ${_contAttempts}/${MAX_CONT}).`);
+        useAIStore.getState().setTruncatedFile({ path: truncated.path, contentSoFar: assembled });
+        const snippet = assembled.slice(-120);
+        sysMsg(`[CONTINUE]: File cut off. Continue EXACTLY from here:\n\`\`\`\n...${snippet}\n\`\`\`\nStart with the very next character. Do NOT repeat anything above.`);
+        setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
         return;
       }
-      let targetPath = targetPathRaw.replace(/^\/+/, "");
+    }
+  }
 
-      // Save the state into the store so the NEXT turn knows to append
-      aiStore.setTruncatedFile({
-        path: targetPath,
-        contentSoFar: openTagMatch[0] // this includes the tag and the partial content
-      });
-
-      aiStore.addAgentLog(`⚠️ Token limit hit. Saving partial file: ${targetPath}`);
-
-      // We don't synthesize a match here anymore because we don't want to save a broken file.
-      // We just ask for the continuation right away.
-      aiStore.addMessage({
-        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[SYSTEM — CONTINUATION REQUIRED]: Your last response hit the token limit before finishing the file "${targetPath}".\n` +
-          `Continue exactly from where you left off. Start your response with the exact next character.\n` +
-          `Do NOT repeat any code you already wrote. \n` +
-          `CRITICAL: DO NOT include ANY conversational text, apologies, or markdown code fences. START TYPING CODE IMMEDIATELY.`,
-      });
-      setTimeout(() => runAgentTurn(null), 500);
+  // ── Detect new truncation (model started a file but ran out of tokens) ────
+  if (!effectiveWriteM && !truncated) {
+    const openTag = content.match(/<write_file\b([^>]*)>([\s\S]*)$/i);
+    if (openTag && !content.includes("</write_file>")) {
+      const pathRaw = extractPath(`<write_file ${openTag[1]}>`, "");
+      if (!pathRaw) {
+        sysMsg(`[ERROR]: Token limit hit, but no valid path found in <write_file> tag. Rewrite the file from the start using <write_file path="filename.ext"> tag.`);
+      } else {
+        const tp = pathRaw.replace(/^\/+/, "");
+        useAIStore.getState().addAgentLog(`⚠️ Token limit hit — saving partial: ${tp}`);
+        useAIStore.getState().setTruncatedFile({ path: tp, contentSoFar: openTag[0] });
+        sysMsg(`[CONTINUE]: Response cut off while writing "${tp}". Continue EXACTLY from where you stopped. Do NOT repeat any code already written.`);
+      }
+      setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
       return;
     }
   }
 
-  if (writeMatch) {
-    let fileContent = writeMatch[2]
-      .replace(/^\s*```[a-z]*\n?/i, "")
-      .replace(/\n?```\s*$/i, "")
+  // ── <write_file> ──────────────────────────────────────────────────────────
+  if (effectiveWriteM) {
+    // Auto-complete guard: don't write if all steps are already done
+    const allSteps = useAIStore.getState().agentSteps;
+    if (allSteps.length > 0 && !allSteps.some(s => s.status === "pending")) {
+      useAIStore.getState().addAgentLog("✅ All files already written. Auto-completing.");
+      useAIStore.getState().setAgentStatus("idle");
+      return;
+    }
+
+    let body = effectiveWriteM[2]
+      .replace(/^\s*```[a-z]*\n?/im, "")
+      .replace(/\n?```\s*$/im, "")
       .replace(/^\n/, "");
 
-    let targetPathRaw = extractFilePath(`<write_file ${writeMatch[1]}>`, fileContent);
-    if (!targetPathRaw) {
-      aiStore.addAgentLog(`⚠️ Invalid <write_file> tag without path. Re-prompting.`);
-      aiStore.addMessage({
-        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[SYSTEM ERROR]: You attempted to write a file but provided no valid path.\n` +
-          `You MUST use the format: <write_file path="your/file/path.ext">`
-      });
+    const pathRaw = extractPath(`<write_file ${effectiveWriteM[1]}>`, body);
+    if (!pathRaw) {
+      sysMsg(`[ERROR]: Missing path in <write_file> tag. Use: <write_file path="your/file.ext">`);
       setTimeout(() => runAgentTurn(null), 500);
       return;
     }
-    let targetPath = targetPathRaw.replace(/^\/+/, "");
 
-    aiStore.setAgentStatus("generating");
-    aiStore.addAgentLog(`📝 Writing: ${targetPath} (${fileContent.length} chars)`);
+    const relPath = pathRaw.replace(/^\/+/, "");
+    const absPath = resolvePath(getRoot(), relPath);
 
-    const root = getWorkspaceRoot();
-    const absPath = resolvePath(root, targetPath);
+    useAIStore.getState().setAgentStatus("generating");
+    useAIStore.getState().addAgentLog(`📝 Writing: ${relPath} (${body.length} chars)`);
 
-    // ── Stage: Connectivity Validation ────────────────────────────────────────
-    const memory = await ensureMemoryAndIndex();
+    // Connectivity validation
+    const mem = await ensureMemory();
     const idx = getProjectIndex();
-    const validation = await validateFileConnectivity(absPath, fileContent, memory, idx, root);
-
-    if (!validation.passed) {
-      aiStore.addAgentLog(`⚠️ Validation issues found:\n${formatValidationResult(validation)}`);
-    } else {
-      aiStore.addAgentLog(`✅ Validation passed (${validation.score}/100)`);
-    }
-
-    // Log orphan warning explicitly so user sees it
-    const orphanIssues = validation.issues.filter(i => i.category === "orphan");
-    if (orphanIssues.length > 0) {
-      aiStore.addAgentLog(`🔗 Note: ${orphanIssues[0].message}`);
-      if (validation.suggestions.length > 0) {
-        aiStore.addAgentLog(`💡 ${validation.suggestions[0]}`);
-      }
-    }
+    const val = await validateFileConnectivity(absPath, body, mem, idx, getRoot());
+    useAIStore.getState().addAgentLog(val.passed ? `✅ Validated (${val.score}/100)` : `⚠️ Validation: ${formatValidationResult(val)}`);
 
     try {
-      await invoke("write_file", { path: absPath, content: fileContent });
-      aiStore.addAgentLog(`✓ Created: ${targetPath}`);
+      await invoke("write_file", { path: absPath, content: body });
+      useAIStore.getState().addAgentLog(`✓ Saved: ${relPath}`);
+      _written.set(relPath, body);
 
-      // Track written file for pre-write context injection
-      _writtenThisTask.set(targetPath, fileContent);
-
-      // ── Stage: Update Index + Memory ────────────────────────────────────────
-      await indexSingleFile(absPath, root);
+      // Async background work — don't block the turn pipeline
+      indexSingleFile(absPath, getRoot()).catch(() => {});
+      refreshTree(getRoot()).catch(() => {});
+      openInEditor(absPath, relPath, body);
 
       if (_projectMemory) {
-        _projectMemory = updateManifestFromFile(_projectMemory, absPath, fileContent, root);
-        _projectMemory.dependencyMap = updateDependencyMap(_projectMemory.dependencyMap, absPath, fileContent, root);
-        // Save memory asynchronously (don't block the agent)
-        saveProjectMemory(root, _projectMemory).catch(() => { });
+        _projectMemory = updateManifestFromFile(_projectMemory, absPath, body, getRoot());
+        _projectMemory.dependencyMap = updateDependencyMap(_projectMemory.dependencyMap, absPath, body, getRoot());
+        saveProjectMemory(getRoot(), _projectMemory).catch(() => {});
       }
-
-      await refreshFileTree(root);
-      openInEditor(absPath, targetPath, fileContent);
 
       // Tick off plan step
-      const currentSteps = useAIStore.getState().agentSteps;
-      const matched = currentSteps.find(s =>
-        (s.text.includes(targetPath) || targetPath.includes(s.text)) && s.status === "pending"
-      );
-      if (matched) aiStore.updateAgentStepStatus(matched.id, "completed");
+      const steps = useAIStore.getState().agentSteps;
+      const matched = steps.find(s => (s.text === relPath || relPath.includes(s.text) || s.text.includes(relPath)) && s.status === "pending");
+      if (matched) useAIStore.getState().updateAgentStepStatus(matched.id, "completed");
 
-      // Check for dependent files that may need updating
-      const relPath = targetPath.replace(/^[/\\]/, "");
-      const dependents = getDependents(relPath);
-      if (dependents.length > 0) {
-        aiStore.addAgentLog(`🔗 Dependent files (may need import updates): ${dependents.slice(0, 5).join(", ")}`);
-      }
+      // Dependents hint
+      const deps = getDependents(relPath);
+      if (deps.length > 0) useAIStore.getState().addAgentLog(`🔗 Dependents: ${deps.slice(0, 4).join(", ")}`);
 
-      let sysMsg: string;
+      // Reset counters for next file
+      _contAttempts  = 0;
+      _noActionCount = 0;
+
       const remaining = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
-
       if (remaining.length > 0) {
-        const nextFile = remaining[0].text;
-        // Build pre-write context: what files have already been written
-        const writtenSummary = getWrittenFileSummary();
-        sysMsg = `[SYSTEM — FILE WRITTEN]: ✓ "${targetPath}" saved successfully.\n` +
-          `${remaining.length} file(s) still remaining in plan.\n` +
-          `NEXT ACTION REQUIRED: Write "${nextFile}" now.\n` +
-          writtenSummary +
-          `Use exactly: <write_file path="${nextFile}">...complete code...</write_file>\n` +
-          `Do NOT output <done>. Do NOT skip this file. Write it in full.\n` +
-          `CRITICAL: Your code in "${nextFile}" MUST correctly reference and connect to the files above.`;
+        const next = remaining[0].text;
+        sysMsg(`[FILE SAVED]: ✓ "${relPath}" written. ${remaining.length} file(s) remaining.${getWrittenSummary()}\nWrite the complete working code for "${next}" now using the <write_file path="${next}"> tag.`);
       } else {
-        // All files written — trigger connectivity verification pass
-        const allWritten = [..._writtenThisTask.keys()].join(", ");
-        sysMsg = `[SYSTEM — ALL FILES WRITTEN]: ✓ "${targetPath}" saved. All ${useAIStore.getState().agentSteps.length} planned files have been written.\n` +
-          `Files created: ${allWritten}\n\n` +
-          `FINAL CONNECTIVITY CHECK:\n` +
-          `Before outputting <done>, verify:\n` +
-          `1. Does index.html (or App.tsx/main.py/server.js) link/import ALL other files?\n` +
-          `2. Are all navigation links between pages correct?\n` +
-          `3. Do all JS/CSS files get loaded in every HTML file that needs them?\n` +
-          `4. Is every component/module imported by something?\n` +
-          `If anything is missing: use <write_file> to update the entry point.\n` +
-          `If everything is connected: output <done>Complete description of what was built.</done>`;
+        sysMsg(`[ALL FILES WRITTEN]: ✓ All ${useAIStore.getState().agentSteps.length} files saved.\nOutput <done>Brief summary of what was built.</done> now.`);
       }
-      aiStore.addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(), content: sysMsg });
-
     } catch (err: any) {
-      aiStore.addAgentLog(`✗ Failed to write: ${err.message || err}`);
-      aiStore.addMessage({
-        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[write_file error]: Could not write "${targetPath}": ${err.message || err}. Try again.`
-      });
+      useAIStore.getState().addAgentLog(`✗ Write failed: ${err.message || err}`);
+      sysMsg(`[write_file error]: Failed to write "${relPath}": ${err.message || err}. Please try again.`);
     }
 
-    setTimeout(() => runAgentTurn(null), 500);
+    setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
     return;
   }
 
-  // ── READ FILE ───────────────────────────────────────────────────────────────
+  // ── <read_file> ───────────────────────────────────────────────────────────
   if (readM) {
-    const targetPath = attr(readM[1], "path|file|name") || "";
-    aiStore.setAgentStatus("reading");
-    aiStore.addAgentLog(`📖 Reading: ${targetPath}`);
+    const tp = attr(readM[1], "path|file|name") || "";
+    useAIStore.getState().setAgentStatus("reading");
+    useAIStore.getState().addAgentLog(`📖 Reading: ${tp}`);
     let fc = "";
-    try {
-      const root = getWorkspaceRoot();
-      fc = await invoke<string>("read_file", { path: resolvePath(root, targetPath) });
-      aiStore.addAgentLog(`✓ Read ${fc.length} chars`);
-    } catch (err: any) {
-      fc = `Error: ${err.message || err}`;
-    }
-    aiStore.addMessage({
-      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[read_file "${targetPath}"]:\n\`\`\`\n${fc}\n\`\`\``
-    });
-    setTimeout(() => runAgentTurn(null), 500);
+    try { fc = await invoke<string>("read_file", { path: resolvePath(getRoot(), tp) }); }
+    catch (e: any) { fc = `Error: ${e.message}`; }
+    sysMsg(`[read_file "${tp}"]:\n\`\`\`\n${fc}\n\`\`\``);
+    setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
     return;
   }
 
-  // ── RUN COMMAND ─────────────────────────────────────────────────────────────
+  // ── <run_command> ─────────────────────────────────────────────────────────
   if (runM) {
     const cmd = runM[1].trim();
-    aiStore.setAgentStatus("executing");
-    aiStore.addAgentLog(`⏳ Awaiting approval: ${cmd}`);
-    aiStore.setPendingCommand(cmd);
-
-    const approved = await new Promise<boolean>(resolve => {
-      aiStore.setCommandPermissionResolve(resolve);
-    });
-    aiStore.setPendingCommand(null);
-    aiStore.setCommandPermissionResolve(null);
-
+    useAIStore.getState().setAgentStatus("executing");
+    useAIStore.getState().addAgentLog(`⏳ Awaiting approval: ${cmd}`);
+    useAIStore.getState().setPendingCommand(cmd);
+    const approved = await new Promise<boolean>(resolve => useAIStore.getState().setCommandPermissionResolve(resolve));
+    useAIStore.getState().setPendingCommand(null);
+    useAIStore.getState().setCommandPermissionResolve(null);
     if (approved) {
-      const output = await runShell(cmd);
-      aiStore.addAgentLog(`✓ Command done`);
-      aiStore.addMessage({
-        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[run_command \`${cmd}\`]:\n\`\`\`\n${output}\n\`\`\``
-      });
+      const out = await runShell(cmd);
+      useAIStore.getState().addAgentLog(`✓ Command done`);
+      sysMsg(`[run_command \`${cmd}\`]:\n\`\`\`\n${out}\n\`\`\``);
     } else {
-      aiStore.addMessage({
-        id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-        content: `[run_command]: User rejected \`${cmd}\`.`
-      });
+      sysMsg(`[run_command]: User rejected \`${cmd}\`.`);
     }
-    setTimeout(() => runAgentTurn(null), 500);
+    setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
     return;
   }
 
-  // ── LIST DIRECTORY ──────────────────────────────────────────────────────────
+  // ── <list_dir> ────────────────────────────────────────────────────────────
   if (listM) {
-    const targetPath = attr(listM[1], "path|dir") || ".";
-    aiStore.setAgentStatus("reading");
-    let output = "";
+    const tp = attr(listM[1], "path|dir") || ".";
+    useAIStore.getState().setAgentStatus("reading");
     try {
-      const root = getWorkspaceRoot();
-      const entries: any[] = await invoke("list_dir", { path: resolvePath(root, targetPath) });
-      output = entries.length === 0 ? "(empty)" : entries.map(e => `${e.is_dir ? "📁" : "📄"} ${e.name}`).join("\n");
-      aiStore.addAgentLog(`✓ Listed ${entries.length} entries`);
-    } catch (err: any) { output = `Error: ${err.message}`; }
-    aiStore.addMessage({
-      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[list_dir "${targetPath}"]:\n\`\`\`\n${output}\n\`\`\``
-    });
-    setTimeout(() => runAgentTurn(null), 500);
+      const entries: any[] = await invoke("list_dir", { path: resolvePath(getRoot(), tp) });
+      const out = entries.length === 0 ? "(empty)" : entries.map(e => `${e.is_dir ? "📁" : "📄"} ${e.name}`).join("\n");
+      useAIStore.getState().addAgentLog(`✓ Listed ${entries.length} entries`);
+      sysMsg(`[list_dir "${tp}"]:\n\`\`\`\n${out}\n\`\`\``);
+    } catch (e: any) { sysMsg(`[list_dir error]: ${e.message}`); }
+    setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
     return;
   }
 
-  // ── SEARCH FILES ────────────────────────────────────────────────────────────
+  // ── <search_files> ────────────────────────────────────────────────────────
   if (searchM) {
     const query = attr(searchM[1], "query") || "";
-    const targetPath = attr(searchM[1], "path|dir") || ".";
-    aiStore.setAgentStatus("reading");
-    let output = "";
+    const tp    = attr(searchM[1], "path|dir") || ".";
+    useAIStore.getState().setAgentStatus("reading");
     try {
-      const root = getWorkspaceRoot();
-      const results: any[] = await invoke("search_files", { path: resolvePath(root, targetPath), query });
-      output = results.length === 0 ? "No results." : results.map(r => `${r.file}:${r.line} — ${r.text}`).join("\n");
-      aiStore.addAgentLog(`✓ ${results.length} search results`);
-    } catch (err: any) { output = `Error: ${err.message}`; }
-    aiStore.addMessage({
-      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[search_files "${query}"]:\n\`\`\`\n${output}\n\`\`\``
-    });
-    setTimeout(() => runAgentTurn(null), 500);
+      const results: any[] = await invoke("search_files", { path: resolvePath(getRoot(), tp), query });
+      const out = results.length === 0 ? "No results." : results.map(r => `${r.file}:${r.line} — ${r.text}`).join("\n");
+      useAIStore.getState().addAgentLog(`✓ ${results.length} result(s) for "${query}"`);
+      sysMsg(`[search_files "${query}"]:\n\`\`\`\n${out}\n\`\`\``);
+    } catch (e: any) { sysMsg(`[search_files error]: ${e.message}`); }
+    setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
     return;
   }
 
-  // ── PLAN ONLY ───────────────────────────────────────────────────────────────
-  if (steps.length > 0) {
-    aiStore.addAgentLog(`📋 Plan ready: ${steps.length} files. Starting execution...`);
-    const firstFile = steps[0].text;
-    aiStore.addMessage({
-      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[SYSTEM — PLAN ACCEPTED]: ${steps.length} files queued.\n` +
-        `START NOW: Write the first file: "${firstFile}"\n` +
-        `Use: <write_file path="${firstFile}">...complete production-ready code...</write_file>\n` +
-        `Rules:\n` +
-        `- Write 100% complete code. No placeholders.\n` +
-        `- Do NOT output <done> yet — you have ${steps.length} files to write first.\n` +
-        `- After this file is saved, the system will tell you the next file to write.`,
-    });
-    setTimeout(() => runAgentTurn(null), 500);
+  // ── Plan received — scaffold folders, then trigger first file ─────────────
+  if (newSteps.length > 0) {
+    await scaffoldAndStart(newSteps);
     return;
   }
 
-  // ── NO ACTION DETECTED — re-prompt to prevent idle hallucination ─────────────
-  const pendingAfterNoAction = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
-  if (pendingAfterNoAction.length > 0 && !aiStore.truncatedFile) {
-    // Model responded with text but no action tag — force it to act
-    // We check !aiStore.truncatedFile to ensure we don't accidentally yell at it
-    // if it was just trying to continue a file but didn't output a tag (which is expected).
-    const nextFile = pendingAfterNoAction[0].text;
-    aiStore.addAgentLog(`⚠️ No action detected. Re-prompting for: ${nextFile}`);
-    aiStore.addMessage({
-      id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(),
-      content: `[SYSTEM — ACTION REQUIRED]: Your last response contained no <write_file> action.\n` +
-        `You still have ${pendingAfterNoAction.length} file(s) to write.\n` +
-        `Write "${nextFile}" RIGHT NOW using:\n` +
-        `<write_file path="${nextFile}">\n[complete file content]\n</write_file>\n` +
-        `Do not explain. Do not plan again. Just write the file.`,
-    });
-    setTimeout(() => runAgentTurn(null), 500);
+  // ── No action detected — re-prompt or skip ────────────────────────────────
+  const pending = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
+  if (pending.length > 0 && !useAIStore.getState().truncatedFile) {
+    _noActionCount++;
+    const nextFile = pending[0].text;
+
+    if (_noActionCount > MAX_NO_ACTION) {
+      // Skip stuck file
+      _noActionCount = 0;
+      _contAttempts  = 0;
+      const stuck = useAIStore.getState().agentSteps.find(s => s.text === nextFile && s.status === "pending");
+      if (stuck) useAIStore.getState().updateAgentStepStatus(stuck.id, "failed");
+      useAIStore.getState().addAgentLog(`⏭️ Skipping stuck file "${nextFile}".`);
+
+      const nextPending = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
+      if (nextPending.length > 0) {
+        sysMsg(`[SKIP]: "${nextFile}" skipped. Write the complete working code for "${nextPending[0].text}" using the <write_file path="${nextPending[0].text}"> tag.`);
+      } else {
+        sysMsg(`[ALL FILES DONE]: Output <done>summary</done> now.`);
+      }
+      setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
+      return;
+    }
+
+    useAIStore.getState().addAgentLog(`⚠️ No action (${_noActionCount}/${MAX_NO_ACTION}). Re-prompting: ${nextFile}`);
+    sysMsg(`[ACTION REQUIRED]: Write the complete, working code for "${nextFile}" now.\nUse the <write_file path="${nextFile}"> tag. Write the FULL file content — no placeholders or partial code.`);
+    setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
     return;
   }
 
-  // ── PURE CONVERSATION (no plan, no action, no pending steps) ─────────────────
-  aiStore.setAgentStatus("idle");
-  aiStore.addAgentLog("Done.");
+  // ── Pure conversation — nothing to orchestrate ────────────────────────────
+  useAIStore.getState().setAgentStatus("idle");
+  useAIStore.getState().addAgentLog("Done.");
 }
 
-// ─── Public: Reset Memory (call when switching workspaces) ────────────────────
-
-export function resetAgentMemory(): void {
-  _projectMemory = null;
-  _indexedWorkspace = "";
+// ─── Utility: add a system message ───────────────────────────────────────────
+function sysMsg(content: string): void {
+  useAIStore.getState().addMessage({ id: `sys-${Date.now()}`, role: "system", timestamp: Date.now(), content });
 }
 
-// ─── Public: Force Re-index ───────────────────────────────────────────────────
 
-export async function reindexWorkspace(): Promise<void> {
-  _indexedWorkspace = "";
-  await ensureMemoryAndIndex();
+// --- Folder Scaffolding ---
+async function scaffoldAndStart(steps: AgentStep[]): Promise<void> {
+  const root = getRoot();
+  const dirs = new Set<string>();
+  for (const s of steps) {
+    const parts = s.text.replace(/\\/g, '/').split('/');
+    for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/'));
+  }
+  if (dirs.size === 0) { useAIStore.getState().addAgentLog('No subdirs needed.'); triggerFirstFile(steps); return; }
+  const sorted = [...dirs].sort();
+  useAIStore.getState().addAgentLog('Creating ' + sorted.length + ' folder(s)...');
+  const results = await Promise.allSettled(sorted.map(d => invoke('create_dir', { path: resolvePath(root, d) })));
+  let log = 'Folder scaffold:\n';
+  sorted.forEach((d, i) => { log += '  ' + (results[i].status === 'fulfilled' ? 'ok' : 'fail') + ' ' + d + '\n'; });
+  useAIStore.getState().addAgentLog(log.trimEnd());
+  refreshTree(root).catch(() => {});
+  const fileList = steps.map((s, i) => (i+1) + '. ' + s.text).join('\n');
+  const firstFile = steps[0].text;
+  sysMsg('[SCAFFOLD COMPLETE]: All ' + sorted.length + ' folder(s) created. ' + steps.length + ' files to write.\n\nFILE LIST:\n' + fileList + '\n\nWrite the complete working code for file 1 of ' + steps.length + ': "' + firstFile + '" using the <write_file path="' + firstFile + '"> tag.\nDo NOT output <done> yet.');
+  setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
 }
+function triggerFirstFile(steps: AgentStep[]): void {
+  const fileList = steps.map((s, i) => (i+1) + '. ' + s.text).join('\n');
+  const firstFile = steps[0].text;
+  sysMsg('[PLAN ACCEPTED]: ' + steps.length + ' files to write.\n\nFILE LIST:\n' + fileList + '\n\nWrite the complete working code for file 1 of ' + steps.length + ': "' + firstFile + '" using the <write_file path="' + firstFile + '"> tag.');
+  setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
+}
+
+// --- Public Exports ---
+export function resetAgentMemory(): void { _projectMemory = null; _indexedRoot = ''; }
+export async function reindexWorkspace(): Promise<void> { _indexedRoot = ''; await ensureMemory(); }

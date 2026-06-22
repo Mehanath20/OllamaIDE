@@ -117,11 +117,14 @@ export const useAIStore = create<AIState>((set) => ({
   addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
   updateLastMessageContent: (content) =>
     set((s) => {
-      const messages = [...s.messages];
-      if (messages.length > 0) {
-        messages[messages.length - 1].content = content;
-      }
-      return { messages };
+      if (s.messages.length === 0) return s;
+      // Mutate in-place for performance during rapid streaming,
+      // then return new array reference for Zustand reactivity
+      s.messages[s.messages.length - 1] = {
+        ...s.messages[s.messages.length - 1],
+        content,
+      };
+      return { messages: [...s.messages] };
     }),
   clearMessages: () => set({ messages: [] }),
   setInstalledModels: (installedModels) => set({ installedModels }),
@@ -142,7 +145,11 @@ export const useAIStore = create<AIState>((set) => ({
         step.id === id ? { ...step, status } : step
       ),
     })),
-  addAgentLog: (log) => set((s) => ({ agentLogs: [...s.agentLogs, log] })),
+  addAgentLog: (log) => set((s) => {
+    const next = [...s.agentLogs, log];
+    // Keep only the last MAX_AGENT_LOGS entries to prevent unbounded growth
+    return { agentLogs: next.length > 200 ? next.slice(next.length - 200) : next };
+  }),
   clearAgentState: () =>
     set({
       agentStatus: "idle",

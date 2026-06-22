@@ -45,6 +45,8 @@ export default function AIPanel() {
     activePersona,
     setActivePersona,
     clearMessages,
+    setAgentAborted,
+    agentStatus,
   } = useAIStore();
   const { setModelLibraryOpen } = useUIStore() as any;
 
@@ -73,10 +75,12 @@ export default function AIPanel() {
     resetAgentMemory();
   }, [workspaceRoot]);
 
-  // Auto-scroll chat to bottom
+  // Auto-scroll chat to bottom ONLY when a new message is added
+  // (NOT on isStreaming changes — that fires 10x/sec during streaming and causes jank)
+  const msgCount = messages.length;
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isStreaming]);
+  }, [msgCount]);
 
   const checkConnection = async () => {
     setChecking(true);
@@ -237,6 +241,15 @@ export default function AIPanel() {
               title="New conversation"
             >
               <Plus size={13} />
+            </button>
+          )}
+          {isStreaming && (
+            <button
+              className="btn-header-action btn-stop"
+              onClick={() => setAgentAborted(true)}
+              title="Stop agent"
+            >
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--red, #ef4444)' }}>■</span>
             </button>
           )}
           <button

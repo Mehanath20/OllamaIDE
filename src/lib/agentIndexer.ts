@@ -191,13 +191,17 @@ export async function buildProjectIndex(
   await collectFiles(workspaceRoot, workspaceRoot, collected);
 
   const MAX_FILES = 2000;
+  const BATCH_SIZE = 10; // Index 10 files concurrently for speed
   const limited = collected.slice(0, MAX_FILES);
 
   const files: IndexedFile[] = [];
-  for (let i = 0; i < limited.length; i++) {
-    const indexed = await indexFile(limited[i], workspaceRoot);
-    if (indexed) files.push(indexed);
-    if (onProgress) onProgress(i + 1, limited.length);
+  for (let i = 0; i < limited.length; i += BATCH_SIZE) {
+    const batch = limited.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(batch.map(f => indexFile(f, workspaceRoot)));
+    for (const indexed of results) {
+      if (indexed) files.push(indexed);
+    }
+    if (onProgress) onProgress(Math.min(i + BATCH_SIZE, limited.length), limited.length);
   }
 
   const index: ProjectIndex = {

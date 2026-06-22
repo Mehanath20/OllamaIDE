@@ -281,31 +281,97 @@ pub async fn chat_ollama(
     model: String,
     messages: Vec<ChatMessagePayload>,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    // Separate connect timeout (fast-fail if Ollama is down) from read timeout (long for generation)
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| e.to_string())?;
+
     let body = serde_json::json!({
         "model": model,
         "messages": messages,
-        "stream": true
+        "stream": true,
+        "keep_alive": "10m",
+        "options": {
+            // Use 8192 context — safe for small (2B–7B) and large (14B+) models alike.
+            // 32768 would OOM tiny models and cause malformed responses mid-stream.
+            "num_ctx": 8192,
+            // Generous token budget for file generation, but not so high it stalls small models
+            "num_predict": 4096,
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "repeat_penalty": 1.05
+        }
     });
 
-    let mut res = client.post("http://localhost:11434/api/chat")
+    let res = client.post("http://localhost:11434/api/chat")
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Connection error: {}. Is Ollama running?", e))?;
 
+    // ── Check HTTP status BEFORE streaming ─────────────────────────────────────
+    // If Ollama returns 4xx/5xx (model not found, bad request, etc.) the body is
+    // a JSON error string — NOT a stream. Trying to decode it as a stream
+    // produces the "error decoding response body" panic.
+    if !res.status().is_success() {
+        let status = res.status();
+        let err_body = res.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        // Emit a final "done" chunk with the error so the frontend shows it
+        let _ = app.emit(
+            "ollama-chat-chunk",
+            ChatChunkPayload {
+                session_id: session_id.clone(),
+                content: format!("⚠️ Ollama error {}: {}", status, err_body),
+                done: true,
+            },
+        );
+        return Err(format!("Ollama returned {}: {}", status, err_body));
+    }
+
+    let mut res = res;
     let mut buffer = Vec::new();
-    while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
-        buffer.extend_from_slice(&chunk);
-        while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
-            let line_bytes = buffer.drain(..=pos).collect::<Vec<u8>>();
-            if let Ok(line_str) = String::from_utf8(line_bytes) {
-                if line_str.trim().is_empty() {
-                    continue;
-                }
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
+    let mut had_content = false;
+    let mut finished = false;
+
+    loop {
+        match res.chunk().await {
+            Ok(Some(chunk)) => {
+                buffer.extend_from_slice(&chunk);
+                while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                    let line_bytes = buffer.drain(..=pos).collect::<Vec<u8>>();
+                    // Skip non-UTF8 lines instead of crashing
+                    let line_str = match String::from_utf8(line_bytes) {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
+                    if line_str.trim().is_empty() { continue; }
+
+                    // Skip lines that are not valid JSON (e.g. Ollama keep-alive pings)
+                    let val = match serde_json::from_str::<serde_json::Value>(&line_str) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    // Surface Ollama-level errors embedded in the stream
+                    if let Some(err) = val["error"].as_str() {
+                        let _ = app.emit(
+                            "ollama-chat-chunk",
+                            ChatChunkPayload {
+                                session_id: session_id.clone(),
+                                content: format!("\n⚠️ Model error: {}", err),
+                                done: true,
+                            },
+                        );
+                        return Err(format!("Model error: {}", err));
+                    }
+
                     let content = val["message"]["content"].as_str().unwrap_or("").to_string();
                     let done = val["done"].as_bool().unwrap_or(false);
+                    if done { finished = true; }
+
+                    if !content.is_empty() { had_content = true; }
 
                     let _ = app.emit(
                         "ollama-chat-chunk",
@@ -315,7 +381,36 @@ pub async fn chat_ollama(
                             done,
                         },
                     );
+
+                    if done { break; }
                 }
+            }
+            Ok(None) => {
+                // Stream ended — if we never got a `done: true` event, emit one now
+                // so the frontend doesn't hang waiting forever
+                if had_content && !finished {
+                    let _ = app.emit(
+                        "ollama-chat-chunk",
+                        ChatChunkPayload {
+                            session_id: session_id.clone(),
+                            content: String::new(),
+                            done: true,
+                        },
+                    );
+                }
+                break;
+            }
+            Err(e) => {
+                // Chunk read error — emit done so frontend recovers gracefully
+                let _ = app.emit(
+                    "ollama-chat-chunk",
+                    ChatChunkPayload {
+                        session_id: session_id.clone(),
+                        content: format!("\n⚠️ Stream interrupted: {}", e),
+                        done: true,
+                    },
+                );
+                return Err(format!("Stream error: {}", e));
             }
         }
     }
