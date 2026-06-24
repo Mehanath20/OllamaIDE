@@ -71,12 +71,13 @@ You control the filesystem using ONLY these XML action tags:
 <write_file path="src/app.js">COMPLETE FILE CONTENT HERE</write_file>
 <done>Summary of what was built.</done>
 
-RULES (obey all of them, always):
+CRITICAL RULES (obey all of them, always):
 1. ONE action tag per response. Never output two actions.
-2. <write_file> must contain 100% complete, working code — never partial, never "// rest here".
-3. Never wrap <write_file> in markdown code fences (no \`\`\`).
-4. Never output <done> while any planned file is still unwritten.
-5. Never invent file paths not in your plan.
+2. <write_file> MUST contain 100% complete, working code. NEVER use placeholders like "// rest here".
+3. NEVER wrap XML tags in markdown code fences (no \`\`\`).
+4. NO conversational filler before or after tags. Output ONLY valid XML.
+5. Do NOT output <done> while any planned file is still unwritten.
+6. Never invent file paths not in your plan.
 `;
 
 const CODER_SYS = BASE + `
@@ -88,17 +89,17 @@ STEP 1 — Plan: Output ONLY a <plan> block listing every file to create.
   </plan>
   No code in this step. No <done>.
 
-STEP 2 — Write: After the system confirms the plan, write ONE file per response.
-  Wait for [FILE SAVED] confirmation before writing the next file.
-  Output <done>summary</done> ONLY after receiving [ALL FILES WRITTEN].
+STEP 2 — Write: After the plan is accepted, write ONE file per response.
+  Wait for [FILE SAVED] before writing the next file.
+  Output <done>summary</done> ONLY when ALL files are written.
 `;
 
 const EDIT_SYS = BASE + `
 EDIT MODE — Modify existing files only. Do NOT rewrite the whole project.
-1. Inspect the provided file context carefully.
-2. Write ONLY the files that need to change.
-3. Use <write_file path="...">complete updated content</write_file>.
-4. Output <done>summary</done> after all changes are written.
+1. Read the provided file context carefully.
+2. Rewrite the targeted file COMPLETELY with your changes integrated.
+3. Use <write_file path="...">COMPLETE UPDATED CONTENT</write_file>.
+4. Output <done>summary</done> when finished.
 Do NOT create new files unless explicitly asked.
 `;
 
@@ -395,7 +396,7 @@ export async function runAgentTurn(userQuery: string | null, attachedImages: str
     payload.push({
       role: "user",
       content: pending.length > 0
-        ? `Write the complete working code for "${pending[0].text}" now using <write_file path="${pending[0].text}"> tag.`
+        ? `Write the complete working code for "${pending[0].text}" now using <write_file path="${pending[0].text}"> tag. Output the XML directly, NO markdown fences.`
         : `Output <done>summary</done> now.`,
     });
   }
@@ -495,7 +496,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
     // Strip conversational filler & markdown fences that small models add
     const clean = content
       .replace(/^[\s\S]*?(Sure|Continuing|Here is|Of course)[^\n]*\n/i, "")
-      .replace(/^\s*```[a-z]*\n?/im, "")
+      .replace(/^\s*```[a-z0-9-]*\n?/im, "")
       .replace(/\n?```\s*$/im, "");
 
     let assembled = truncated.contentSoFar;
@@ -510,7 +511,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
     } else {
       // Stitch: find longest overlap to avoid duplicate characters
       let stitched = false;
-      for (let len = Math.min(assembled.length, clean.length, 200); len > 0; len--) {
+      for (let len = Math.min(assembled.length, clean.length, 400); len > 0; len--) {
         if (assembled.endsWith(clean.slice(0, len))) { assembled += clean.slice(len); stitched = true; break; }
       }
       if (!stitched) assembled += clean;
@@ -577,7 +578,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
     }
 
     let body = effectiveWriteM[2]
-      .replace(/^\s*```[a-z]*\n?/im, "")
+      .replace(/^\s*```[a-z0-9-]*\n?/im, "")
       .replace(/\n?```\s*$/im, "")
       .replace(/^\n/, "");
 
@@ -738,7 +739,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
     }
 
     useAIStore.getState().addAgentLog(`⚠️ No action (${_noActionCount}/${MAX_NO_ACTION}). Re-prompting: ${nextFile}`);
-    sysMsg(`[ACTION REQUIRED]: Write the complete, working code for "${nextFile}" now.\nUse the <write_file path="${nextFile}"> tag. Write the FULL file content — no placeholders or partial code.`);
+    sysMsg(`[ACTION REQUIRED]: Write the complete, working code for "${nextFile}" now.\nUse the <write_file path="${nextFile}"> tag. Write the FULL file content — no placeholders, no markdown fences.`);
     setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
     return;
   }
@@ -772,13 +773,13 @@ async function scaffoldAndStart(steps: AgentStep[]): Promise<void> {
   refreshTree(root).catch(() => {});
   const fileList = steps.map((s, i) => (i+1) + '. ' + s.text).join('\n');
   const firstFile = steps[0].text;
-  sysMsg('[SCAFFOLD COMPLETE]: All ' + sorted.length + ' folder(s) created. ' + steps.length + ' files to write.\n\nFILE LIST:\n' + fileList + '\n\nWrite the complete working code for file 1 of ' + steps.length + ': "' + firstFile + '" using the <write_file path="' + firstFile + '"> tag.\nDo NOT output <done> yet.');
+  sysMsg('[SCAFFOLD COMPLETE]: All ' + sorted.length + ' folder(s) created. ' + steps.length + ' files to write.\n\nFILE LIST:\n' + fileList + '\n\nWrite the complete working code for file 1 of ' + steps.length + ': "' + firstFile + '" using the <write_file path="' + firstFile + '"> tag. Output the XML directly, without markdown fences.\nDo NOT output <done> yet.');
   setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
 }
 function triggerFirstFile(steps: AgentStep[]): void {
   const fileList = steps.map((s, i) => (i+1) + '. ' + s.text).join('\n');
   const firstFile = steps[0].text;
-  sysMsg('[PLAN ACCEPTED]: ' + steps.length + ' files to write.\n\nFILE LIST:\n' + fileList + '\n\nWrite the complete working code for file 1 of ' + steps.length + ': "' + firstFile + '" using the <write_file path="' + firstFile + '"> tag.');
+  sysMsg('[PLAN ACCEPTED]: ' + steps.length + ' files to write.\n\nFILE LIST:\n' + fileList + '\n\nWrite the complete working code for file 1 of ' + steps.length + ': "' + firstFile + '" using the <write_file path="' + firstFile + '"> tag. Output the XML directly, without markdown fences.');
   setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
 }
 
