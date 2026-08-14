@@ -1,8 +1,12 @@
 /* ============================================================
-   agent.ts — AntiNetwork Agent Engine (v5 — Stable)
+   agent.ts — AntiNetwork Agent Engine (v6 — Dual-Agent)
+   Orchestrator: routes to Planner+Coder (isolated contexts)
+   or Monolithic mode (legacy fallback for edits).
+   Optimised for Qwen 2.5 Coder 3B (small-model tuning)
    ============================================================ */
 import { invoke } from "@tauri-apps/api/core";
-import { useAIStore, ChatMessage, AgentStep } from "../store/aiStore";
+import { remove } from "@tauri-apps/plugin-fs";
+import { useAIStore, ChatMessage, AgentStep, TaskPrompt } from "../store/aiStore";
 import { useFileStore } from "../store/fileStore";
 import { useEditorStore } from "../store/editorStore";
 import { chatOllama } from "./ollama";
@@ -17,17 +21,21 @@ import {
   retrieveRelevantContext, getDependents, getProjectIndex,
 } from "./agentIndexer";
 import { validateFileConnectivity, formatValidationResult } from "./agentValidator";
+import { runPlanner, buildWrittenSoFarSummary } from "./agentPlanner";
+import { runCoderTask } from "./agentCoder";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const MAX_HISTORY    = 6;           // messages kept in LLM payload
-const MAX_TURNS      = 60;          // hard stop to prevent infinite loops
-const TURN_DELAY_MS  = 250;         // pause between autonomous turns
-const CTX_BUDGET     = 5_000;       // max chars injected as workspace context
-const FIRST_MSG_CAP  = 10_000;      // char cap for initial user message
-const MSG_CAP        = 2_000;       // char cap for subsequent messages
-const MAX_CONT       = 5;           // max continuation turns before force-save
-const MAX_NO_ACTION  = 2;           // max blank turns before skipping a file
-const TINY_CONT_LEN  = 400;         // chars: if continuation is shorter, auto-close
+// ─── Constants (tuned for Qwen 2.5 Coder 3B) ─────────────────────────────────
+// 3B models have a small effective context (~4K tokens usable for generation).
+// Keep everything SHORT to avoid the model losing track of the XML format.
+const MAX_HISTORY    = 4;           // fewer history turns → more room for code
+const MAX_TURNS      = 30;          // 3B loops fast; cap earlier
+const TURN_DELAY_MS  = 300;         // slight extra breathing room between turns
+const CTX_BUDGET     = 1_500;       // tiny context injection — preserve token budget
+const FIRST_MSG_CAP  = 3_000;       // small initial message cap for 3B
+const MSG_CAP        = 800;         // very short follow-up messages
+const MAX_CONT       = 3;           // fewer continuation attempts (3B loses track easily)
+const MAX_NO_ACTION  = 3;           // give 3B a bit more retries before skipping
+const TINY_CONT_LEN  = 200;         // auto-close shorter continuations for 3B
 
 // ─── Module State ─────────────────────────────────────────────────────────────
 let _turnCount       = 0;
@@ -60,47 +68,54 @@ function detectEditIntent(q: string): boolean {
   return edit && !create;
 }
 
-// ─── System Prompts ───────────────────────────────────────────────────────────
-const BASE = `You are AntiNetwork, an autonomous AI coding agent inside a local IDE.
-You control the filesystem using ONLY these XML action tags:
+// ─── System Prompts (tuned for Qwen 2.5 Coder 3B) ───────────────────────────
+// DESIGN PRINCIPLE: 3B models work best with SHORT, IMPERATIVE, NUMBERED rules.
+// Long paragraphs and repeated context cause the model to forget the XML format.
+// Keep every prompt as short as possible while preserving critical constraints.
+const BASE = `You are AntiNetwork, a coding agent in a local IDE.
+You output ONLY XML action tags — no prose, no markdown, no JSON.
 
-<read_file path="src/app.js"/>
-<list_dir path="./src"/>
-<search_files query="text" path="./src"/>
-<run_command>npm install</run_command>
-<write_file path="src/app.js">COMPLETE FILE CONTENT HERE</write_file>
-<done>Summary of what was built.</done>
+AVAILABLE TAGS (use exactly one per reply):
+<read_file path="..."/>             — read a file
+<list_dir path="..."/>              — list a directory
+<search_files query="..." path="..."/> — search for text
+<run_command>COMMAND</run_command>   — run a shell command (needs user approval)
+<write_file path="...">CODE</write_file> — write a complete file
+<delete_file path="..."/>           — delete a file
+<done>SUMMARY</done>                — task finished
 
-CRITICAL RULES (obey all of them, always):
-1. ONE action tag per response. Never output two actions.
-2. <write_file> MUST contain 100% complete, working code. NEVER use placeholders like "// rest here".
-3. NEVER wrap XML tags in markdown code fences (no \`\`\`).
-4. NO conversational filler before or after tags. Output ONLY valid XML.
-5. Do NOT output <done> while any planned file is still unwritten.
-6. Never invent file paths not in your plan.
+RULES:
+1. Output ONE tag per reply. Nothing else.
+2. <write_file> must contain the FULL file. No "// ...", no placeholders.
+3. No markdown fences around tags.
+4. Never output <done> if any planned file is unwritten.
+5. Never invent paths. Use only paths you inspected or planned.
 `;
 
+// CODER: simplified single-step for 3B — skip mandatory plan phase,
+// go straight to writing; the engine will manage file sequencing.
 const CODER_SYS = BASE + `
-WORKFLOW:
-STEP 1 — Plan: Output ONLY a <plan> block listing every file to create.
-  <plan>
-  - [ ] index.html
-  - [ ] assets/css/style.css
-  </plan>
-  No code in this step. No <done>.
+TASK FLOW:
+- For a new project: first output a <plan> block listing files, then write them one by one.
+- For each file: output <write_file path="FILENAME">FULL CODE</write_file>.
+- Wait for [FILE SAVED] before writing the next file.
+- When ALL files are written: output <done>brief summary</done>.
 
-STEP 2 — Write: After the plan is accepted, write ONE file per response.
-  Wait for [FILE SAVED] before writing the next file.
-  Output <done>summary</done> ONLY when ALL files are written.
+<plan> FORMAT (file names only, one per line):
+<plan>
+src/index.html
+src/style.css
+src/app.js
+</plan>
 `;
 
+// EDIT: even simpler for 3B — just read, rewrite, done.
 const EDIT_SYS = BASE + `
-EDIT MODE — Modify existing files only. Do NOT rewrite the whole project.
-1. Read the provided file context carefully.
-2. Rewrite the targeted file COMPLETELY with your changes integrated.
-3. Use <write_file path="...">COMPLETE UPDATED CONTENT</write_file>.
-4. Output <done>summary</done> when finished.
-Do NOT create new files unless explicitly asked.
+EDIT MODE:
+- Read the file first with <read_file path="..."/>.
+- Then rewrite it completely: <write_file path="...">FULL UPDATED CODE</write_file>.
+- Then output <done>what changed</done>.
+- Do NOT create new files unless asked.
 `;
 
 const ARCH_SYS    = BASE + `ARCHITECT MODE: Write only .md documentation files. No source code.`;
@@ -204,10 +219,14 @@ function parsePlan(text: string): AgentStep[] {
     if (!line) continue;
 
     let fp: string | null = null;
-    if (line.match(/^[-*•]\s*\[[xX\s]\]/)) fp = line.replace(/^[-*•]\s*\[[xX\s]\]\s*/, "").trim();
-    else if (line.match(/^\d+\.\s+/)) fp = line.replace(/^\d+\.\s+/, "").trim();
-    else if (line.match(/^[-*•]\s+/) && !line.includes("[")) fp = line.replace(/^[-*•]\s+/, "").trim();
-    else if (!line.startsWith("<") && !line.startsWith("#") && line.includes(".") && !line.includes(" ")) fp = line;
+    // Extract file path from common list formats or tree structures
+    // Match: - [ ] file, 1. file, - file, ├── file, file
+    const cleaned = line.replace(/^([-*•]\s*\[[xX\s]\]|^\d+\.\s+|^[-*•]\s+|^[│├└─\s]+)/, "").trim();
+    
+    // Valid file paths must contain a dot (for extension) and no spaces
+    if (cleaned && cleaned.includes(".") && !cleaned.includes(" ")) {
+      fp = cleaned;
+    }
 
     if (!fp) continue;
     fp = fp.split(" ")[0].replace(/^\.\//, "").replace(/^\/+/, "");
@@ -328,10 +347,26 @@ export async function runAgentTurn(userQuery: string | null, attachedImages: str
     store.clearAgentState();
     store.setAgentAborted(false);
     _written.clear();
-    _projectType = detectProjectType(userQuery);
+    const detectedType = detectProjectType(userQuery);
+    if (detectedType !== "generic" || _projectType === "generic") {
+      _projectType = detectedType;
+    }
     _sessionId   = `s-${Date.now()}`;
     _isEditMode  = detectEditIntent(userQuery) && _indexedRoot !== "";
+
+    // ── Route to Planner+Coder if enabled and this is a new project ──────────
+    const arch = store.agentArchitecture;
+    if (arch === "planner-coder" && !_isEditMode) {
+      store.addAgentLog("🧠 Dual-Agent mode: Planner → Coder pipeline");
+      // Run the planner-coder flow instead of the monolithic loop
+      runPlannerCoderFlow(userQuery, attachedImages);
+      return;
+    }
+
     if (_isEditMode) store.addAgentLog("✏️ Edit mode: targeting existing files.");
+    if (!_isEditMode && store.agentArchitecture === "planner-coder") {
+      store.addAgentLog("ℹ️ Edit detected — using monolithic mode.");
+    }
   }
 
   if (useAIStore.getState().agentAborted) return;
@@ -449,6 +484,8 @@ async function handleCompletedTurn(content: string): Promise<void> {
     } else {
       useAIStore.getState().addAgentLog("⚠️ Duplicate <plan> ignored (already executing).");
     }
+  } else if (content.match(/<plan>([\s\S]*?)<\/plan>/i)) {
+    useAIStore.getState().addAgentLog("⚠️ Found <plan> tag but could not extract any valid file paths.");
   }
 
   // ── Match action tags ─────────────────────────────────────────────────────
@@ -458,35 +495,16 @@ async function handleCompletedTurn(content: string): Promise<void> {
   const listM   = content.match(/<list_dir\b([^>]*)\/>/i);
   const searchM = content.match(/<search_files\b([^>]*)\/>/i);
   const doneM   = content.match(/<done>([\s\S]*?)<\/done>/i);
+  const deleteM = content.match(/<delete_file\b([^>]*)\/>/i);
 
   const attr = (attrs: string, name: string) => {
     const m = attrs.match(new RegExp(`\\b${name}\\s*=\\s*["']?([^"'\\s>]+)["']?`, "i"));
     return m ? m[1].trim() : null;
   };
 
-  const anyAction = !!(writeM || readM || runM || listM || searchM || doneM);
+  const anyAction = !!(writeM || readM || runM || listM || searchM || doneM || deleteM);
   if (anyAction) _noActionCount = 0;
 
-  // ── <done> ────────────────────────────────────────────────────────────────
-  if (doneM) {
-    const stillPending = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
-    if (stillPending.length > 0) {
-      useAIStore.getState().addAgentLog(`⚠️ Premature <done> — ${stillPending.length} file(s) unwritten. Re-prompting.`);
-      sysMsg(`You sent <done> too early. ${stillPending.length} files remain.\nWrite the complete code for "${stillPending[0].text}" now using the <write_file path="${stillPending[0].text}"> tag.`);
-      setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
-      return;
-    }
-    useAIStore.getState().setAgentStatus("idle");
-    useAIStore.getState().addAgentLog(`✅ Task complete.`);
-    useAIStore.getState().setAgentSteps(
-      useAIStore.getState().agentSteps.map(s => ({ ...s, status: "completed" as const }))
-    );
-    if (_projectMemory) {
-      _projectMemory.activeContext = `Last task completed at ${new Date().toISOString()}`;
-      saveProjectMemory(getRoot(), _projectMemory).catch(() => {});
-    }
-    return;
-  }
 
   // ── Continuation mode: stitch partial file ────────────────────────────────
   const truncated = useAIStore.getState().truncatedFile;
@@ -542,7 +560,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
         useAIStore.getState().addAgentLog(`⚠️ Still truncated (attempt ${_contAttempts}/${MAX_CONT}).`);
         useAIStore.getState().setTruncatedFile({ path: truncated.path, contentSoFar: assembled });
         const snippet = assembled.slice(-120);
-        sysMsg(`[CONTINUE]: File cut off. Continue EXACTLY from here:\n\`\`\`\n...${snippet}\n\`\`\`\nStart with the very next character. Do NOT repeat anything above.`);
+        sysMsg(`[CONTINUE]: File cut off. Continue EXACTLY from here:\n\`\`\`\n...${snippet}\n\`\`\`\nCRITICAL: Start with the very next character. Do NOT output a <plan>. Do NOT output <write_file>. Output ONLY the exact remaining raw code to finish the file.`);
         setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
         return;
       }
@@ -560,7 +578,7 @@ async function handleCompletedTurn(content: string): Promise<void> {
         const tp = pathRaw.replace(/^\/+/, "");
         useAIStore.getState().addAgentLog(`⚠️ Token limit hit — saving partial: ${tp}`);
         useAIStore.getState().setTruncatedFile({ path: tp, contentSoFar: openTag[0] });
-        sysMsg(`[CONTINUE]: Response cut off while writing "${tp}". Continue EXACTLY from where you stopped. Do NOT repeat any code already written.`);
+        sysMsg(`[CONTINUE]: Response cut off while writing "${tp}". Continue EXACTLY from where you stopped. CRITICAL: Do NOT output a <plan>. Do NOT output a <write_file> tag. Output ONLY the remaining raw code. Do NOT repeat any code already written.`);
       }
       setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
       return;
@@ -659,6 +677,22 @@ async function handleCompletedTurn(content: string): Promise<void> {
     return;
   }
 
+  // ── <delete_file> ───────────────────────────────────────────────────────────
+  if (deleteM) {
+    const tp = attr(deleteM[1], "path|file|name") || "";
+    useAIStore.getState().setAgentStatus("executing");
+    useAIStore.getState().addAgentLog(`🗑️ Deleting: ${tp}`);
+    const absPath = resolvePath(getRoot(), tp);
+    try {
+      await remove(absPath);
+      sysMsg(`[delete_file "${tp}"]:\n✓ File deleted successfully.`);
+    } catch (e: any) {
+      sysMsg(`[delete_file error]: ${e.message}`);
+    }
+    setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
+    return;
+  }
+
   // ── <run_command> ─────────────────────────────────────────────────────────
   if (runM) {
     const cmd = runM[1].trim();
@@ -705,6 +739,27 @@ async function handleCompletedTurn(content: string): Promise<void> {
       sysMsg(`[search_files "${query}"]:\n\`\`\`\n${out}\n\`\`\``);
     } catch (e: any) { sysMsg(`[search_files error]: ${e.message}`); }
     setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
+    return;
+  }
+
+  // ── <done> ────────────────────────────────────────────────────────────────
+  if (doneM) {
+    const stillPending = useAIStore.getState().agentSteps.filter(s => s.status === "pending");
+    if (stillPending.length > 0) {
+      useAIStore.getState().addAgentLog(`⚠️ Premature <done> — ${stillPending.length} file(s) unwritten. Re-prompting.`);
+      sysMsg(`You sent <done> too early. ${stillPending.length} files remain.\nWrite the complete code for "${stillPending[0].text}" now using the <write_file path="${stillPending[0].text}"> tag.`);
+      setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
+      return;
+    }
+    useAIStore.getState().setAgentStatus("idle");
+    useAIStore.getState().addAgentLog(`✅ Task complete.`);
+    useAIStore.getState().setAgentSteps(
+      useAIStore.getState().agentSteps.map(s => ({ ...s, status: "completed" as const }))
+    );
+    if (_projectMemory) {
+      _projectMemory.activeContext = `Last task completed at ${new Date().toISOString()}`;
+      saveProjectMemory(getRoot(), _projectMemory).catch(() => {});
+    }
     return;
   }
 
@@ -781,6 +836,128 @@ function triggerFirstFile(steps: AgentStep[]): void {
   const firstFile = steps[0].text;
   sysMsg('[PLAN ACCEPTED]: ' + steps.length + ' files to write.\n\nFILE LIST:\n' + fileList + '\n\nWrite the complete working code for file 1 of ' + steps.length + ': "' + firstFile + '" using the <write_file path="' + firstFile + '"> tag. Output the XML directly, without markdown fences.');
   setTimeout(() => runAgentTurn(null), TURN_DELAY_MS);
+}
+
+// ─── Planner + Coder Orchestration Flow ───────────────────────────────────────
+/**
+ * Runs the full Planner → Coder pipeline:
+ * 1. Calls the Planner (one-shot LLM call) to get TaskPrompt[]
+ * 2. Scaffolds any needed directories
+ * 3. Iterates through tasks, calling the Coder for each with a FRESH context
+ * 4. Tracks progress and updates UI
+ * 5. Falls back to monolithic mode if planner fails
+ */
+async function runPlannerCoderFlow(userQuery: string, attachedImages: string[]): Promise<void> {
+  const store = useAIStore.getState();
+  const root = getRoot();
+
+  // Ensure memory & index are ready
+  store.addAgentLog("🔍 Preparing project index...");
+  await ensureMemory();
+
+  // ── Phase 1: Run the Planner ──────────────────────────────────────────────
+  const tasks = await runPlanner(userQuery);
+
+  if (tasks.length === 0) {
+    // Planner failed — fall back to monolithic mode
+    store.addAgentLog("⚠️ Planner produced no tasks. Falling back to classic mode.");
+    store.setAgentPhase("idle");
+    // Re-run as monolithic by temporarily switching architecture
+    const origArch = store.agentArchitecture;
+    store.setAgentArchitecture("monolithic");
+    await runAgentTurn(userQuery, attachedImages);
+    store.setAgentArchitecture(origArch);
+    return;
+  }
+
+  // Store tasks in the queue
+  store.setPlannerTaskQueue(tasks);
+  store.setCurrentTaskIndex(0);
+
+  // Convert tasks to AgentSteps for the UI checklist
+  const steps: AgentStep[] = tasks.map((t, i) => ({
+    id: `step-${i + 1}`,
+    text: `${t.targetFile} — ${t.purpose.slice(0, 50)}`,
+    status: "pending" as const,
+  }));
+  store.setAgentSteps(steps);
+
+  // ── Phase 1.5: Scaffold directories ───────────────────────────────────────
+  const dirs = new Set<string>();
+  for (const t of tasks) {
+    const parts = t.targetFile.replace(/\\/g, '/').split('/');
+    for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/'));
+  }
+  if (dirs.size > 0) {
+    const sorted = [...dirs].sort();
+    store.addAgentLog(`📁 Creating ${sorted.length} folder(s)...`);
+    await Promise.allSettled(sorted.map(d => invoke('create_dir', { path: resolvePath(root, d) })));
+    refreshTree(root).catch(() => {});
+  }
+
+  // ── Phase 2: Run the Coder for each task ──────────────────────────────────
+  store.setAgentPhase("coding");
+  const completedTasks: TaskPrompt[] = [];
+
+  for (let i = 0; i < tasks.length; i++) {
+    if (useAIStore.getState().agentAborted) {
+      store.addAgentLog("⛔ Stopped by user.");
+      break;
+    }
+
+    const task = tasks[i];
+    store.setCurrentTaskIndex(i);
+
+    // Mark step as running
+    const stepId = `step-${i + 1}`;
+    useAIStore.getState().updateAgentStepStatus(stepId, "running");
+
+    // Build the "written so far" summary for this task
+    task.writtenSoFar = buildWrittenSoFarSummary(completedTasks, _written);
+
+    store.addAgentLog(`\n━━━ Task ${i + 1}/${tasks.length}: ${task.targetFile} ━━━`);
+
+    // Run the Coder with a FRESH context — no history from previous files
+    const result = await runCoderTask(task, _written, _projectMemory);
+
+    if (result.success) {
+      _written.set(result.filePath, result.content);
+      completedTasks.push(task);
+      useAIStore.getState().updateAgentStepStatus(stepId, "completed");
+      store.addAgentLog(`✅ Completed: ${result.filePath}`);
+
+      // Update project memory
+      if (_projectMemory) {
+        _projectMemory = updateManifestFromFile(_projectMemory, resolvePath(root, result.filePath), result.content, root);
+        _projectMemory.dependencyMap = updateDependencyMap(_projectMemory.dependencyMap, resolvePath(root, result.filePath), result.content, root);
+        saveProjectMemory(root, _projectMemory).catch(() => {});
+      }
+    } else {
+      useAIStore.getState().updateAgentStepStatus(stepId, "failed");
+      store.addAgentLog(`❌ Failed: ${result.filePath} — ${result.error}`);
+    }
+  }
+
+  // ── Phase 3: Done ─────────────────────────────────────────────────────────
+  const succeeded = completedTasks.length;
+  const failed = tasks.length - succeeded;
+  store.setAgentPhase("idle");
+  store.setAgentStatus("idle");
+  store.addAgentLog(`\n🏁 Pipeline complete: ${succeeded} succeeded, ${failed} failed out of ${tasks.length} tasks.`);
+
+  // Add a summary message
+  const summaryMsg: ChatMessage = {
+    id: `done-${Date.now()}`,
+    role: "assistant",
+    content: `✅ **Project complete!**\n\n${succeeded}/${tasks.length} files written successfully:\n${completedTasks.map(t => `- ✓ \`${t.targetFile}\``).join('\n')}${failed > 0 ? `\n\n${failed} file(s) failed — check logs for details.` : ''}`,
+    timestamp: Date.now(),
+  };
+  useAIStore.getState().addMessage(summaryMsg);
+
+  if (_projectMemory) {
+    _projectMemory.activeContext = `Last task completed at ${new Date().toISOString()} — ${succeeded} files written`;
+    saveProjectMemory(root, _projectMemory).catch(() => {});
+  }
 }
 
 // --- Public Exports ---

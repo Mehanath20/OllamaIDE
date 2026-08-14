@@ -27,6 +27,7 @@ import { resolveFileMentions } from "../../lib/fileUtils";
 import { useFileStore } from "../../store/fileStore";
 import ChatMessage from "./ChatMessage";
 import AgentStatus from "./AgentStatus";
+import { Brain, Code2 } from "lucide-react";
 
 
 export default function AIPanel() {
@@ -46,7 +47,10 @@ export default function AIPanel() {
     setActivePersona,
     clearMessages,
     setAgentAborted,
-    agentStatus,
+    plannerModel,
+    setPlannerModel,
+    agentArchitecture,
+    setAgentArchitecture,
   } = useAIStore();
   const { setModelLibraryOpen } = useUIStore() as any;
 
@@ -202,6 +206,18 @@ export default function AIPanel() {
             <option value="Reviewer">Reviewer</option>
             <option value="Documenter">Documenter</option>
           </select>
+          {/* Architecture mode toggle */}
+          <button
+            className={`btn-arch-toggle ${agentArchitecture === 'planner-coder' ? 'active' : ''}`}
+            onClick={() => setAgentArchitecture(
+              agentArchitecture === 'planner-coder' ? 'monolithic' : 'planner-coder'
+            )}
+            title={agentArchitecture === 'planner-coder' 
+              ? 'Dual-Agent mode (Planner → Coder). Click for Classic mode.' 
+              : 'Classic mode. Click for Dual-Agent (Planner → Coder).'}
+          >
+            {agentArchitecture === 'planner-coder' ? '🧠⚡' : '⚙️'}
+          </button>
         </div>
         <div className="ai-header-right">
           {ollamaOnline && (
@@ -210,7 +226,7 @@ export default function AIPanel() {
                 className="model-select"
                 value={activeModel || ""}
                 onChange={(e) => setActiveModel(e.target.value)}
-                title="Select Active Model"
+                title="Select Coder Model"
               >
                 {installedModels.length === 0 ? (
                   <option disabled value="">No models installed</option>
@@ -266,6 +282,45 @@ export default function AIPanel() {
           </button>
         </div>
       </div>
+
+      {/* Dual-Agent Model Selector Row — shown when planner-coder is active */}
+      {ollamaOnline && agentArchitecture === 'planner-coder' && installedModels.length > 0 && (
+        <div className="dual-model-row">
+          <div className="dual-model-col">
+            <div className="dual-model-label">
+              <Brain size={11} />
+              <span>Planner</span>
+            </div>
+            <select
+              className="dual-model-select"
+              value={plannerModel || activeModel}
+              onChange={(e) => setPlannerModel(e.target.value)}
+              title="Model for planning (generates task prompts)"
+            >
+              {installedModels.map(model => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
+          </div>
+          <div className="dual-model-divider" />
+          <div className="dual-model-col">
+            <div className="dual-model-label">
+              <Code2 size={11} />
+              <span>Coder</span>
+            </div>
+            <select
+              className="dual-model-select"
+              value={activeModel}
+              onChange={(e) => setActiveModel(e.target.value)}
+              title="Model for coding (writes files with fresh context)"
+            >
+              {installedModels.map(model => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* Main Screen Content */}
       {!ollamaOnline ? (
@@ -466,6 +521,78 @@ export default function AIPanel() {
         }
 
         .persona-select option {
+          background: var(--bg-2);
+          color: var(--text-primary);
+        }
+
+        .btn-arch-toggle {
+          background: var(--bg-2);
+          border: 1px solid var(--border-soft);
+          border-radius: 4px;
+          padding: 2px 6px;
+          font-size: 11px;
+          cursor: pointer;
+          transition: all 0.15s;
+          line-height: 1;
+        }
+        .btn-arch-toggle.active {
+          background: rgba(124, 58, 237, 0.15);
+          border-color: rgba(124, 58, 237, 0.4);
+        }
+        .btn-arch-toggle:hover {
+          background: rgba(124, 58, 237, 0.25);
+        }
+
+        /* Dual Model Selector Row */
+        .dual-model-row {
+          display: flex;
+          align-items: stretch;
+          gap: 0;
+          padding: 0 var(--space-3);
+          border-bottom: 1px solid var(--border-soft);
+          background: rgba(0,0,0,0.15);
+          flex-shrink: 0;
+        }
+
+        .dual-model-col {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 6px 8px;
+        }
+
+        .dual-model-divider {
+          width: 1px;
+          background: var(--border-soft);
+          margin: 4px 0;
+        }
+
+        .dual-model-label {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          color: var(--text-muted);
+          text-transform: uppercase;
+        }
+
+        .dual-model-select {
+          background: var(--bg-2);
+          border: 1px solid var(--border-soft);
+          border-radius: 4px;
+          color: var(--text-primary);
+          font-size: 10px;
+          font-weight: 600;
+          padding: 3px 4px;
+          cursor: pointer;
+          outline: none;
+          width: 100%;
+        }
+
+        .dual-model-select option {
           background: var(--bg-2);
           color: var(--text-primary);
         }

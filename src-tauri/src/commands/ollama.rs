@@ -297,8 +297,8 @@ pub async fn chat_ollama(
             // Use 8192 context — safe for small (2B–7B) and large (14B+) models alike.
             // 32768 would OOM tiny models and cause malformed responses mid-stream.
             "num_ctx": 8192,
-            // Generous token budget for file generation, but not so high it stalls small models
-            "num_predict": 4096,
+            // Unlimited generation bounded only by context size to stop arbitrary cutoffs
+            "num_predict": -1,
             "temperature": 0.1,
             "top_p": 0.9,
             "repeat_penalty": 1.05

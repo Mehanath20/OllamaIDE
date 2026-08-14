@@ -1,19 +1,25 @@
 /* ============================================================
    AgentStatus.tsx — AI Agent Dashboard.
    Renders checklist steps, console logs, running status indicators,
-   and interactive prompts for command execution permissions.
+   phase badges (Planning / Coding), and interactive prompts for
+   command execution permissions.
+   Enhanced for Dual-Agent (Planner + Coder) architecture.
    ============================================================ */
-import { Square, ShieldAlert, Check, X } from "lucide-react";
+import { Square, ShieldAlert, Check, X, Brain, Code2, Sparkles } from "lucide-react";
 import { useAIStore } from "../../store/aiStore";
 
 export default function AgentStatus() {
   const {
     agentStatus,
+    agentPhase,
     agentSteps,
     agentLogs,
     pendingCommand,
     commandPermissionResolve,
     clearAgentState,
+    agentArchitecture,
+    currentTaskIndex,
+    plannerTaskQueue,
   } = useAIStore();
 
   const isIdle = agentStatus === "idle";
@@ -34,6 +40,15 @@ export default function AgentStatus() {
     return null;
   }
 
+  // Phase display info
+  const phaseInfo = agentPhase === "planning"
+    ? { icon: <Brain size={12} />, label: "Planning", color: "var(--yellow)" }
+    : agentPhase === "coding"
+    ? { icon: <Code2 size={12} />, label: `Coding ${currentTaskIndex + 1}/${plannerTaskQueue.length}`, color: "var(--accent)" }
+    : { icon: <Sparkles size={12} />, label: "Idle", color: "var(--text-muted)" };
+
+  const isDualAgent = agentArchitecture === "planner-coder";
+
   return (
     <div className="agent-status-panel">
       {/* Running status bar */}
@@ -41,8 +56,15 @@ export default function AgentStatus() {
         <div className="agent-title-row">
           <span className="agent-indicator-pulse" data-status={agentStatus} />
           <span className="agent-header-title">
-            Agent Status: <strong style={{ textTransform: "capitalize" }}>{agentStatus}</strong>
+            Agent: <strong style={{ textTransform: "capitalize" }}>{agentStatus}</strong>
           </span>
+          {/* Phase badge — only in dual-agent mode */}
+          {isDualAgent && agentPhase !== "idle" && (
+            <span className="agent-phase-badge" style={{ borderColor: phaseInfo.color, color: phaseInfo.color }}>
+              {phaseInfo.icon}
+              <span>{phaseInfo.label}</span>
+            </span>
+          )}
         </div>
         {!isIdle && (
           <button className="btn-stop-agent" onClick={clearAgentState} title="Stop Agent execution">
@@ -52,17 +74,32 @@ export default function AgentStatus() {
         )}
       </div>
 
+      {/* Context isolation indicator — dual-agent only */}
+      {isDualAgent && agentPhase === "coding" && (
+        <div className="context-isolation-badge">
+          <Sparkles size={10} />
+          <span>Fresh context — no history from previous files</span>
+        </div>
+      )}
+
       {/* Plan checklist */}
       {agentSteps.length > 0 && (
         <div className="agent-steps-container">
-          <div className="agent-section-title">CHECKLIST</div>
+          <div className="agent-section-title">
+            {isDualAgent ? "PLANNER TASK LIST" : "CHECKLIST"}
+          </div>
           <div className="agent-steps-list">
             {agentSteps.map((step) => (
               <div key={step.id} className="agent-step-item" data-status={step.status}>
                 <span className="step-checkbox">
-                  {step.status === "completed" ? "✓" : step.status === "running" ? "●" : "○"}
+                  {step.status === "completed" ? "✓" :
+                   step.status === "running" ? "●" :
+                   step.status === "failed" ? "✗" : "○"}
                 </span>
                 <span className="step-text">{step.text}</span>
+                {isDualAgent && step.status === "running" && (
+                  <span className="step-fresh-badge">🧹 fresh ctx</span>
+                )}
               </div>
             ))}
           </div>
@@ -126,6 +163,7 @@ export default function AgentStatus() {
           display: flex;
           align-items: center;
           gap: var(--space-2);
+          flex-wrap: wrap;
         }
 
         .agent-indicator-pulse {
@@ -135,7 +173,8 @@ export default function AgentStatus() {
           background: var(--text-muted);
         }
 
-        .agent-indicator-pulse[data-status="thinking"] {
+        .agent-indicator-pulse[data-status="thinking"],
+        .agent-indicator-pulse[data-status="planning"] {
           background: var(--yellow);
           box-shadow: 0 0 8px var(--yellow);
           animation: pulse 1.5s infinite;
@@ -163,6 +202,30 @@ export default function AgentStatus() {
         .agent-header-title {
           font-size: var(--text-xs);
           color: var(--text-primary);
+        }
+
+        .agent-phase-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 10px;
+          font-weight: 700;
+          border: 1px solid;
+          border-radius: 10px;
+          padding: 1px 8px;
+          letter-spacing: 0.03em;
+        }
+
+        .context-isolation-badge {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 10px;
+          color: var(--green);
+          background: rgba(34, 197, 94, 0.08);
+          border: 1px solid rgba(34, 197, 94, 0.2);
+          border-radius: 4px;
+          padding: 3px 8px;
         }
 
         .btn-stop-agent {
@@ -216,10 +279,25 @@ export default function AgentStatus() {
           font-weight: 600;
         }
 
+        .agent-step-item[data-status="failed"] {
+          color: var(--red);
+          text-decoration: line-through;
+        }
+
         .step-checkbox {
           font-family: monospace;
           font-weight: bold;
           flex-shrink: 0;
+        }
+
+        .step-fresh-badge {
+          font-size: 9px;
+          color: var(--green);
+          background: rgba(34, 197, 94, 0.1);
+          border-radius: 3px;
+          padding: 0 4px;
+          flex-shrink: 0;
+          margin-left: auto;
         }
 
         .command-permission-alert {
